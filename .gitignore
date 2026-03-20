@@ -1,0 +1,57 @@
+# Go build artifacts
+bin/
+dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Dependency directories
+vendor/
+
+# IDE/editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+
+# Python env
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+
+# Node modules
+admin-web/node_modules/
+
+# Compiled admin UI assets
+internal/admin/adminui/
+# Logs
+logs/
+*.log
+
+# Local databases
+*.db
+*.db-shm
+*.db-wal
+
+# Docker
+docker-compose.override.yml
+
+# temp files
+*.tmp
+*.bak
+*.orig
+
+# other
+backup/
+*.env
+scripts/

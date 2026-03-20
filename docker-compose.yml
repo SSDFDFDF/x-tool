@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  x-tool:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: x-tool
+    ports:
+      - "${X_TOOL_PORT:-8026}:${X_TOOL_PORT:-8026}"
+    environment:
+      X_TOOL_PORT: ${X_TOOL_PORT:-8026}
+      X_TOOL_HOST: ${X_TOOL_HOST:-0.0.0.0}
+      X_TOOL_TIMEOUT: ${X_TOOL_TIMEOUT:-180}
+      X_TOOL_LOG_LEVEL: ${X_TOOL_LOG_LEVEL:-INFO}
+      X_TOOL_LOG_PATH: ${X_TOOL_LOG_PATH:-logs/app.log}
+      X_TOOL_ADMIN_PASSWORD: ${X_TOOL_ADMIN_PASSWORD:-}
+      X_TOOL_DB_DRIVER: ${X_TOOL_DB_DRIVER:-sqlite}
+      X_TOOL_DB_DSN: ${X_TOOL_DB_DSN:-}
+      X_TOOL_DB_PATH: ${X_TOOL_DB_PATH:-data.db}
+      X_TOOL_DEFAULT_CLIENT_KEY: ${X_TOOL_DEFAULT_CLIENT_KEY:-sk-x-tool-dev}
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    restart: unless-stopped
