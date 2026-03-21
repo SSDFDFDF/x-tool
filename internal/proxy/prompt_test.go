@@ -186,7 +186,7 @@ func TestGenerateFunctionPromptHandlesToolWithoutParameters(t *testing.T) {
 	}
 }
 
-func TestGenerateFunctionPromptAppendsToolOutputRules(t *testing.T) {
+func TestGenerateFunctionPromptConsolidatesOutputRulesIntoProtocolRules(t *testing.T) {
 	description := "Search the web"
 	tools := []protocol.Tool{{
 		Type: "function",
@@ -204,19 +204,19 @@ func TestGenerateFunctionPromptAppendsToolOutputRules(t *testing.T) {
 		},
 	}}
 
-	prompt, err := GenerateFunctionPrompt(tools, "<Function_Test_Start>", "{tool_catalog}\n{trigger_signal}", config.SoftToolProtocolXML)
+	prompt, err := GenerateFunctionPrompt(tools, "<Function_Test_Start>", "{tool_catalog}\n{protocol_rules}\n{output_rules}", config.SoftToolProtocolXML)
 	if err != nil {
 		t.Fatalf("GenerateFunctionPrompt returned error: %v", err)
 	}
 
 	unescaped := html.UnescapeString(prompt)
-	if !strings.Contains(unescaped, "A text turn must be complete on its own. If a tool is needed, use the structured tool turn in the same turn.") {
+	if strings.Count(unescaped, "Output rules:") != 1 {
+		t.Fatalf("expected output rules to appear once via protocol rules, got %q", unescaped)
+	}
+	if !strings.Contains(unescaped, "If a tool is needed: output the tool turn now in this same turn, optionally preceded by ONE brief sentence.") {
 		t.Fatalf("expected prompt to forbid delaying tool use into a later turn, got %q", unescaped)
 	}
-	if !strings.Contains(unescaped, "either output only the structured tool call, or output one brief sentence immediately before the tool call") {
-		t.Fatalf("expected prompt to enforce short text before tool call at most, got %q", unescaped)
-	}
-	if !strings.Contains(unescaped, "After the tool call starts, do not output any extra text.") {
+	if !strings.Contains(unescaped, "After the tool turn starts: output NOTHING else. No explanations, no summaries, no follow-up.") {
 		t.Fatalf("expected prompt to forbid text after tool call, got %q", unescaped)
 	}
 }
@@ -247,7 +247,7 @@ func TestGenerateFunctionPromptIncludesXMLMultiCallExample(t *testing.T) {
 	if !strings.Contains(prompt, "Multiple call shape:") {
 		t.Fatalf("expected XML prompt to include multi-call section, got %q", prompt)
 	}
-	if !strings.Contains(prompt, "containing one or more <invoke name=\"tool_name\">...</invoke> elements") {
+	if !strings.Contains(prompt, "exactly one <function_calls>...</function_calls> block containing one or more <invoke name=\"tool_name\">...</invoke> elements") {
 		t.Fatalf("expected XML rules to allow multiple invokes, got %q", prompt)
 	}
 	if !strings.Contains(prompt, "<function_calls>\n  <invoke name=\"tool_name\">") || !strings.Contains(prompt, "<invoke name=\"tool_name_2\">") {
@@ -356,7 +356,7 @@ Output:
 	if !strings.Contains(prompt, "Use <TOOL_CALL> for one tool call and <TOOL_CALLS> for multiple tool calls.") {
 		t.Fatalf("expected protocol rules placeholder to render sentinel JSON instructions, got %q", prompt)
 	}
-	if !strings.Contains(prompt, "A text turn must be complete on its own. If a tool is needed to answer, continue, or complete the current turn, use a sentinel + JSON tool turn in this same turn.") {
+	if !strings.Contains(prompt, "If a tool is needed: output the tool turn now in this same turn, optionally preceded by ONE brief sentence.") {
 		t.Fatalf("expected sentinel JSON rules to forbid delaying tool use into a later turn, got %q", prompt)
 	}
 	if !strings.Contains(prompt, "<Function_Test_Start>\n<TOOL_CALL>") {
@@ -365,8 +365,8 @@ Output:
 	if strings.Contains(prompt, "<function_list>") {
 		t.Fatalf("expected sentinel JSON custom template to avoid XML tool catalog, got %q", prompt)
 	}
-	if strings.Count(prompt, "Tool output rules:") != 1 {
-		t.Fatalf("expected output rules placeholder to prevent duplicate appended rules, got %q", prompt)
+	if strings.Count(prompt, "Output rules:") != 1 {
+		t.Fatalf("expected output rules to come only from protocol rules, got %q", prompt)
 	}
 }
 
@@ -408,8 +408,11 @@ func TestGenerateFunctionPromptUsesMarkdownBlockDefaultTemplate(t *testing.T) {
 	if !strings.Contains(prompt, "```mbtoolcalls") || !strings.Contains(prompt, "mbcall: tool_name") || !strings.Contains(prompt, "mbarg[query]: value") {
 		t.Fatalf("expected markdown block example in prompt, got %q", prompt)
 	}
-	if !strings.Contains(prompt, "Start the fenced block with ```mbtoolcalls and each tool call with `mbcall: tool_name`.") || !strings.Contains(prompt, "Write arguments as line-start headers in bracket form, for example `mbarg[query]: weather`.") || !strings.Contains(prompt, "For multiline or exact text, write `mbarg[prompt]:` and continue the value on following lines") {
-		t.Fatalf("expected markdown encoding hints in tool catalog, got %q", prompt)
+	if !strings.Contains(prompt, "Inside the fenced block, start each tool call with `mbcall: tool_name`.") || !strings.Contains(prompt, "Add arguments with line-start bracket headers, for example `mbarg[query]: value`.") || !strings.Contains(prompt, "For multiline or exact text, write `mbarg[name]:` and continue the value until the next line-start `mbarg[...]:` line") {
+		t.Fatalf("expected markdown encoding hints in protocol rules, got %q", prompt)
+	}
+	if strings.Contains(prompt, "Encoding hints:") {
+		t.Fatalf("expected markdown tool catalog to avoid duplicated encoding hints, got %q", prompt)
 	}
 	if !strings.Contains(prompt, "required args: query(string) - search query") {
 		t.Fatalf("expected compact required args list, got %q", prompt)

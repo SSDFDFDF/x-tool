@@ -12,14 +12,10 @@ import (
 	"x-tool/internal/protocol"
 )
 
-const toolOutputRules = `
-
-Tool output rules:
-- A text turn must be complete on its own. If a tool is needed, use the structured tool turn in the same turn.
-- If a tool is needed, either output only the structured tool call, or output one brief sentence immediately before the tool call.
-- After the tool call starts, do not output any extra text.
-- Do not add explanations, summaries, or follow-up text after the tool call.
-`
+const baseOutputRules = `Output rules:
+- If no tool is needed: reply with a complete text turn.
+- If a tool is needed: output the tool turn now in this same turn, optionally preceded by ONE brief sentence.
+- After the tool turn starts: output NOTHING else. No explanations, no summaries, no follow-up.`
 
 const defaultXMLPromptTemplate = `Reply in one of two modes only: a complete text turn, or a single XML tool turn, optionally preceded by one brief sentence.
 Tools: {tool_catalog}
@@ -114,11 +110,7 @@ func GenerateFunctionPrompt(tools []protocol.Tool, triggerSignal, customTemplate
 	}
 
 	data := buildPromptTemplateData(tools, triggerSignal, protocolName)
-	prompt := applyPromptTemplate(template, data)
-	if !strings.Contains(template, "{output_rules}") {
-		prompt += toolOutputRules
-	}
-	return prompt, nil
+	return applyPromptTemplate(template, data), nil
 }
 
 func SafeProcessToolChoice(toolChoice any, protocolName string) string {
@@ -207,7 +199,7 @@ func buildPromptTemplateData(tools []protocol.Tool, triggerSignal, protocolName 
 		ProtocolRules:     buildProtocolRules(protocolName, triggerSignal),
 		SingleCallExample: buildSingleCallExample(protocolName, triggerSignal),
 		MultiCallExample:  buildMultiCallExample(protocolName, triggerSignal),
-		OutputRules:       strings.TrimSpace(toolOutputRules),
+		OutputRules:       "",
 	}
 }
 
@@ -379,10 +371,6 @@ func renderMarkdownBlockToolCatalog(tools []protocol.Tool) string {
 		toolBlocks = append(toolBlocks, strings.Join(lines, "\n"))
 	}
 
-	toolBlocks = append(toolBlocks,
-		"Encoding hints:\n- Start the fenced block with ```mbtoolcalls and each tool call with `mbcall: tool_name`.\n- Write arguments as line-start headers in bracket form, for example `mbarg[query]: weather`.\n- For nested fields use dot paths inside brackets, for example `mbarg[headers.authorization]: Bearer token`.\n- Use [] to append array items, for example `mbarg[tags[]]: news`.\n- Use @json only when a value must stay as raw JSON, for example `mbarg[payload@json]: {\"mode\":\"strict\"}`.\n- For multiline or exact text, write `mbarg[prompt]:` and continue the value on following lines until the next line-start `mbarg[...]:` line, the next `mbcall:` line, or the closing fence.",
-	)
-
 	return "Available tools:\n" + strings.Join(toolBlocks, "\n\n")
 }
 
@@ -407,34 +395,37 @@ func protocolFormatLabel(protocolName string) string {
 }
 
 func buildProtocolRules(protocolName, triggerSignal string) string {
+	var formatRules []string
 	switch protocolName {
 	case config.SoftToolProtocolMarkdownBlock:
-		return strings.Join([]string{
-			"If no tool is needed, reply with a complete text turn.",
-			"A text turn must be complete on its own. If a tool is needed to answer, continue, or complete the current turn, use a Markdown fenced tool turn in this same turn. Do not output a text turn that says you will call a tool next.",
-			"If a tool is needed, output " + triggerSignal + " alone on its own line, then output exactly one ```mbtoolcalls fenced block.",
-			"Inside the fenced block, start each tool call with `mbcall: tool_name`.",
-			"Add arguments with line-start bracket headers, for example `mbarg[query]: value`.",
-			"For multiline or exact text, write `mbarg[name]:` and continue the value on following lines until the next line-start `mbarg[...]:` line, the next `mbcall:` line, or the closing fence.",
-			"For nested fields use dot paths. For arrays use key[]. Use key@json only when the value must be parsed as JSON.",
-			"The tool name must come from the tool list. Include required parameters. Do not output any text after the closing fence.",
-		}, "\n")
+		formatRules = []string{
+			"Format rules:",
+			"- Use a Markdown fenced tool turn when a tool is needed. Do not output a text turn that says you will call a tool next.",
+			"- Output " + triggerSignal + " alone on its own line, then exactly one ```mbtoolcalls fenced block.",
+			"- Inside the fenced block, start each tool call with `mbcall: tool_name`.",
+			"- Add arguments with line-start bracket headers, for example `mbarg[query]: value`.",
+			"- For nested fields use dot paths. For arrays use key[]. Use key@json only when the value must be parsed as JSON.",
+			"- For multiline or exact text, write `mbarg[name]:` and continue the value until the next line-start `mbarg[...]:` line, the next `mbcall:` line, or the closing fence.",
+			"- The tool name must come from the tool list and include required parameters.",
+		}
 	case config.SoftToolProtocolSentinelJSON:
-		return strings.Join([]string{
-			"If no tool is needed, reply with a complete text turn.",
-			"A text turn must be complete on its own. If a tool is needed to answer, continue, or complete the current turn, use a sentinel + JSON tool turn in this same turn. Do not output a text turn that says you will call a tool next.",
-			"If a tool is needed, output " + triggerSignal + " alone on its own line, then output exactly one JSON tool block.",
-			"Use <TOOL_CALL> for one tool call and <TOOL_CALLS> for multiple tool calls.",
-			"The tool name must come from the tool list. The arguments field must be a JSON object. Do not output any text after the closing sentinel tag.",
-		}, "\n")
+		formatRules = []string{
+			"Format rules:",
+			"- Use a sentinel + JSON tool turn when a tool is needed. Do not output a text turn that says you will call a tool next.",
+			"- Output " + triggerSignal + " alone on its own line, then exactly one JSON tool block.",
+			"- Use <TOOL_CALL> for one tool call and <TOOL_CALLS> for multiple tool calls.",
+			"- The tool name must come from the tool list and the arguments field must be a JSON object.",
+		}
 	default:
-		return strings.Join([]string{
-			"If no tool is needed, reply with a complete text turn.",
-			"A text turn must be complete on its own. If a tool is needed to answer, continue, or complete the current turn, use an XML tool turn in this same turn. Do not output a text turn that says you will call a tool next.",
-			"If a tool is needed, output " + triggerSignal + " alone on its own line, then output exactly one <function_calls>...</function_calls> block containing one or more <invoke name=\"tool_name\">...</invoke> elements.",
-			"The tool name must come from the tool list. Include required parameters. Use raw text inside <parameter>. Do not output any text after </function_calls>.",
-		}, "\n")
+		formatRules = []string{
+			"Format rules:",
+			"- Use an XML tool turn when a tool is needed. Do not output a text turn that says you will call a tool next.",
+			"- Output " + triggerSignal + " alone on its own line, then exactly one <function_calls>...</function_calls> block containing one or more <invoke name=\"tool_name\">...</invoke> elements.",
+			"- The tool name must come from the tool list. Include required parameters and use raw text inside <parameter>.",
+		}
 	}
+
+	return baseOutputRules + "\n\n" + strings.Join(formatRules, "\n")
 }
 
 func buildSingleCallExample(protocolName, triggerSignal string) string {

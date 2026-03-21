@@ -260,35 +260,7 @@ onMounted(() => {
                 class="h-12 px-4 bg-white/10 border-b-2 border-white/20 text-white text-sm focus-visible:outline-none focus-visible:border-bitcoin transition-all rounded-md font-mono"
               />
             </div>
-            <div class="md:col-span-2 rounded-xl border border-bitcoin/20 bg-bitcoin/5 p-4 md:p-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <div class="text-sm font-semibold text-white">Prompt 配置已迁移到独立页面</div>
-                <div class="mt-1 text-xs leading-6 text-white/60">
-                  全局 soft-tool 协议、默认 profile、默认模板内容和全部 prompt profiles 都统一在专用页面维护，避免这里重复展示造成误导。
-                </div>
-              </div>
-              <router-link
-                to="/prompts"
-                class="inline-flex items-center justify-center rounded-md border border-bitcoin/30 bg-bitcoin/10 px-4 py-2 text-sm font-medium text-bitcoin transition-colors hover:bg-bitcoin/20"
-              >
-                打开 Prompt 模板页面
-              </router-link>
-            </div>
-            <div class="md:col-span-2 rounded-xl border border-white/10 bg-black/30 p-4 md:p-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <div class="text-sm font-semibold text-white">上游路由与绑定也使用独立页面</div>
-                <div class="mt-1 text-xs leading-6 text-white/60">
-                  upstream 基础地址、模型清单、client key 绑定、软工具协议覆盖和 prompt profile 绑定，请统一到专用页面维护。
-                </div>
-              </div>
-              <router-link
-                to="/upstreams"
-                class="inline-flex items-center justify-center rounded-md border border-white/15 bg-white/5 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-white/10"
-              >
-                打开 Upstreams 页面
-              </router-link>
-            </div>
-          </div>
+           </div>
         </div>
       </transition>
 
