@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"x-tool/internal/config"
+	"x-tool/internal/protocol"
 )
 
 func TestParseFunctionCallsXMLUsesXMLParserBehavior(t *testing.T) {
@@ -123,17 +124,17 @@ func TestParseFunctionCallsXMLParsesLegacyBareMultipleInvokes(t *testing.T) {
 
 func TestParseFunctionCallsMarkdownBlockParsesCanonicalFence(t *testing.T) {
 	trigger := "<Function_Test_Start>"
-	input := trigger + "\n```toolcalls\n" +
-		"call search\n" +
-		"arg_query: weather\n" +
-		"arg_filters.city: shanghai\n" +
-		"arg_tags[]: news\n" +
-		"arg_tags[]: local\n\n" +
-		"call write_file\n" +
-		"arg_path: /tmp/out.txt\n" +
-		"arg_content:\n" +
-		"  line 1\n" +
-		"  line 2\n" +
+	input := trigger + "\n```mbtoolcalls\n" +
+		"mbcall: search\n" +
+		"mbarg[query]: weather\n" +
+		"mbarg[filters.city]: shanghai\n" +
+		"mbarg[tags[]]: news\n" +
+		"mbarg[tags[]]: local\n\n" +
+		"mbcall: write_file\n" +
+		"mbarg[path]: /tmp/out.txt\n" +
+		"mbarg[content]:\n" +
+		"line 1\n" +
+		"line 2\n" +
 		"```\n"
 
 	parsed := ParseFunctionCallsMarkdownBlock(input, trigger)
@@ -159,9 +160,8 @@ func TestParseFunctionCallsMarkdownBlockParsesCanonicalFence(t *testing.T) {
 func TestParseFunctionCallsMarkdownBlockParsesFenceInfoAlias(t *testing.T) {
 	trigger := "<Function_Test_Start>"
 	input := "```" + trigger + "\n" +
-		"call search\n" +
-		"arg_options@json:\n" +
-		"  {\"query\":\"weather\",\"limit\":3}\n" +
+		"mbcall: search\n" +
+		"mbarg[options@json]: {\"query\":\"weather\",\"limit\":3}\n" +
 		"```"
 
 	parsed := ParseFunctionCallsMarkdownBlock(input, trigger)
@@ -174,17 +174,17 @@ func TestParseFunctionCallsMarkdownBlockParsesFenceInfoAlias(t *testing.T) {
 	}
 }
 
-func TestParseFunctionCallsMarkdownBlockParsesBoundedMultilineArg(t *testing.T) {
+func TestParseFunctionCallsMarkdownBlockParsesMultilineArgument(t *testing.T) {
 	trigger := "<Function_Test_Start>"
-	input := trigger + "\n```toolcalls\n" +
-		"call Agent\n" +
-		"arg_description: 检查代码冗余问题\n" +
-		"arg_prompt:\n" +
-		"  请全面分析这个代码库中的冗余问题，包括：\n" +
-		"  \n" +
-		"  1. 重复代码\n" +
-		"  2. 重复逻辑\n" +
-		"arg_subagent_type: Explore\n" +
+	input := trigger + "\n```mbtoolcalls\n" +
+		"mbcall: Agent\n" +
+		"mbarg[description]: 检查代码冗余问题\n" +
+		"mbarg[prompt]:\n" +
+		"请全面分析这个代码库中的冗余问题，包括：\n" +
+		"\n" +
+		"1. 重复代码\n" +
+		"2. 重复逻辑\n" +
+		"mbarg[subagent_type]: Explore\n" +
 		"```\n"
 
 	parsed := ParseFunctionCallsMarkdownBlock(input, trigger)
@@ -198,9 +198,122 @@ func TestParseFunctionCallsMarkdownBlockParsesBoundedMultilineArg(t *testing.T) 
 		t.Fatalf("expected description arg, got %#v", parsed[0].Args["description"])
 	}
 	if parsed[0].Args["prompt"] != "请全面分析这个代码库中的冗余问题，包括：\n\n1. 重复代码\n2. 重复逻辑" {
-		t.Fatalf("expected bounded multiline prompt arg, got %#v", parsed[0].Args["prompt"])
+		t.Fatalf("expected multiline prompt arg, got %#v", parsed[0].Args["prompt"])
 	}
 	if parsed[0].Args["subagent_type"] != "Explore" {
 		t.Fatalf("expected trailing arg after multiline block, got %#v", parsed[0].Args["subagent_type"])
+	}
+}
+
+func TestParseFunctionCallsMarkdownBlockParsesInlineFirstLineWithContinuation(t *testing.T) {
+	trigger := "<Function_Test_Start>"
+	input := trigger + "\n```mbtoolcalls\n" +
+		"mbcall: Agent\n" +
+		"mbarg[description]: 探索前端代码冗余\n" +
+		"mbarg[prompt]: 探索这个项目的前端代码结构，识别以下类型的冗余：\n" +
+		"\n" +
+		"1. 重复的组件或函数\n" +
+		"2. 未使用的导入和变量\n" +
+		"3. 相似逻辑的重复实现\n" +
+		"4. 可以合并的重复样式或配置\n" +
+		"5. 死代码（未使用的文件或导出）\n" +
+		"\n" +
+		"请先确定前端代码的位置（可能在 src、web、frontend、client 等目录），然后进行彻底的分析。提供具体的文件路径和代码示例来说明发现的问题。\n" +
+		"mbarg[subagent_type]: Explore\n" +
+		"```\n"
+
+	parsed := ParseFunctionCallsMarkdownBlock(input, trigger)
+	if len(parsed) != 1 {
+		t.Fatalf("expected 1 markdown tool call, got %#v", parsed)
+	}
+	if parsed[0].Args["prompt"] != "探索这个项目的前端代码结构，识别以下类型的冗余：\n\n1. 重复的组件或函数\n2. 未使用的导入和变量\n3. 相似逻辑的重复实现\n4. 可以合并的重复样式或配置\n5. 死代码（未使用的文件或导出）\n\n请先确定前端代码的位置（可能在 src、web、frontend、client 等目录），然后进行彻底的分析。提供具体的文件路径和代码示例来说明发现的问题。" {
+		t.Fatalf("expected inline-first-line prompt arg, got %#v", parsed[0].Args["prompt"])
+	}
+	if parsed[0].Args["subagent_type"] != "Explore" {
+		t.Fatalf("expected subagent_type arg, got %#v", parsed[0].Args["subagent_type"])
+	}
+}
+
+func TestParseFunctionCallsMarkdownBlockParsesGluedArgumentMarker(t *testing.T) {
+	trigger := "<Function_Test_Start>"
+	input := trigger + "\n```mbtoolcalls\n" +
+		"mbcall: Edit\n" +
+		"mbarg[file_path]: /tmp/example.txt\n" +
+		"mbarg[new_string]:\n" +
+		"line 1\n" +
+		"line 2mbarg[old_string]:\n" +
+		"original line\n" +
+		"mbarg[replace_all]: false\n" +
+		"```\n"
+
+	tools := []protocol.Tool{
+		{
+			Type: "function",
+			Function: protocol.ToolFunction{
+				Name: "Edit",
+				Parameters: map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"file_path":   map[string]any{"type": "string"},
+						"new_string":  map[string]any{"type": "string"},
+						"old_string":  map[string]any{"type": "string"},
+						"replace_all": map[string]any{"type": "boolean"},
+					},
+					"required": []string{"file_path", "new_string", "old_string"},
+				},
+			},
+		},
+	}
+
+	parsed := ParseFunctionCallsMarkdownBlockWithTools(input, trigger, tools)
+	if len(parsed) != 1 {
+		t.Fatalf("expected 1 markdown tool call, got %#v", parsed)
+	}
+	if parsed[0].Args["new_string"] != "line 1\nline 2" {
+		t.Fatalf("expected glued old_string marker to split from new_string, got %#v", parsed[0].Args["new_string"])
+	}
+	if parsed[0].Args["old_string"] != "original line" {
+		t.Fatalf("expected old_string arg, got %#v", parsed[0].Args["old_string"])
+	}
+	if parsed[0].Args["replace_all"] != false {
+		t.Fatalf("expected replace_all false, got %#v", parsed[0].Args["replace_all"])
+	}
+}
+
+func TestParseFunctionCallsMarkdownBlockParsesGluedCallMarker(t *testing.T) {
+	trigger := "<Function_Test_Start>"
+	input := trigger + "\n```mbtoolcalls\n" +
+		"mbcall: search\n" +
+		"mbarg[query]: weathermbcall: write_file\n" +
+		"mbarg[path]: /tmp/out.txt\n" +
+		"```\n"
+
+	parsed := ParseFunctionCallsMarkdownBlock(input, trigger)
+	if len(parsed) != 2 {
+		t.Fatalf("expected 2 markdown tool calls, got %#v", parsed)
+	}
+	if parsed[0].Args["query"] != "weather" {
+		t.Fatalf("expected first call query, got %#v", parsed[0].Args["query"])
+	}
+	if parsed[1].Name != "write_file" || parsed[1].Args["path"] != "/tmp/out.txt" {
+		t.Fatalf("expected glued mbcall marker to start second call, got %#v", parsed[1])
+	}
+}
+
+func TestParseFunctionCallsMarkdownBlockParsesMarkersWithoutNewlineBoundaries(t *testing.T) {
+	trigger := "<Function_Test_Start>"
+	input := trigger + "\n```mbtoolcalls\n" +
+		"mbcall: searchmbarg[query]: weathermbcall: write_filembarg[path]: /tmp/out.txt\n" +
+		"```\n"
+
+	parsed := ParseFunctionCallsMarkdownBlock(input, trigger)
+	if len(parsed) != 2 {
+		t.Fatalf("expected 2 markdown tool calls, got %#v", parsed)
+	}
+	if parsed[0].Name != "search" || parsed[0].Args["query"] != "weather" {
+		t.Fatalf("expected first call parsed without newline boundaries, got %#v", parsed[0])
+	}
+	if parsed[1].Name != "write_file" || parsed[1].Args["path"] != "/tmp/out.txt" {
+		t.Fatalf("expected second call parsed without newline boundaries, got %#v", parsed[1])
 	}
 }

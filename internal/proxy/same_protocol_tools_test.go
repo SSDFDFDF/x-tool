@@ -377,7 +377,7 @@ func TestTransformResponsesResponseConvertsMarkdownBlockSoftToolTextToFunctionCa
 				"content": []any{
 					map[string]any{
 						"type": "output_text",
-						"text": "prefix\n<Function_Test_Start>\n```toolcalls\ncall search\narg_query: weather\n```",
+						"text": "prefix\n<Function_Test_Start>\n```mbtoolcalls\nmbcall: search\nmbarg[query]: weather\n```",
 					},
 				},
 			},

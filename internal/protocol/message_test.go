@@ -115,19 +115,32 @@ func TestFormatAssistantToolCallsForAIMarkdownBlockFlattensStructuredArguments(t
 	}
 
 	result := FormatAssistantToolCallsForAI(toolCalls, "<Function_Test_Start>", config.SoftToolProtocolMarkdownBlock)
-	if !strings.Contains(result, "<Function_Test_Start>\n```toolcalls") {
+	if !strings.Contains(result, "<Function_Test_Start>\n```mbtoolcalls") {
 		t.Fatalf("expected markdown block wrapper, got %s", result)
 	}
-	if !strings.Contains(result, "call search") || !strings.Contains(result, "call write_file") {
+	if !strings.Contains(result, "mbcall: search") || !strings.Contains(result, "mbcall: write_file") {
 		t.Fatalf("expected call lines in markdown block, got %s", result)
 	}
-	if !strings.Contains(result, "arg_headers.authorization: Bearer token") {
+	if !strings.Contains(result, "mbarg[headers.authorization]: Bearer token") {
 		t.Fatalf("expected nested map to flatten into dot path, got %s", result)
 	}
-	if !strings.Contains(result, "arg_tags[]: news") || !strings.Contains(result, "arg_tags[]: local") {
+	if !strings.Contains(result, "mbarg[tags[]]: news") || !strings.Contains(result, "mbarg[tags[]]: local") {
 		t.Fatalf("expected arrays to become repeated [] args, got %s", result)
 	}
-	if !strings.Contains(result, "arg_content:\n  line 1\n  line 2") {
-		t.Fatalf("expected multiline strings to use bounded block continuations, got %s", result)
+	if !strings.Contains(result, "mbarg[content]:\nline 1\nline 2") {
+		t.Fatalf("expected multiline strings to use multiline mbarg blocks, got %s", result)
+	}
+}
+
+func TestFormatToolResultForAIAvoidsStructuredToolInstructions(t *testing.T) {
+	store := toolcall.NewManager(8, time.Minute, time.Minute)
+	store.Put("call_123", "Edit", map[string]any{"path": "/tmp/out.txt"}, "Calling tool Edit")
+
+	result := FormatToolResultForAI(store, "call_123", "done", config.SoftToolProtocolMarkdownBlock)
+	if strings.Contains(result, "always use the previously specified structured tool call format") {
+		t.Fatalf("expected tool result wrapper to avoid tool-call instructions, got %q", result)
+	}
+	if !strings.Contains(result, "Tool result for Edit:") {
+		t.Fatalf("expected compact tool result label, got %q", result)
 	}
 }

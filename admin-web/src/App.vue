@@ -51,7 +51,7 @@ const handleLogout = async () => {
 
     <div v-else class="flex h-screen overflow-hidden bg-void text-white font-body">
       <!-- Sidebar -->
-      <aside class="w-64 bg-darkmatter border-r border-white/10 flex flex-col shrink-0 flex-shrink-0 relative z-20">
+      <aside class="w-64 bg-darkmatter border-r border-white/10 flex flex-col shrink-0 relative z-20">
         <div class="h-16 flex items-center px-6 border-b border-white/10 relative overflow-hidden">
           <div class="flex items-center gap-3 relative z-10">
             <img :src="'/admin/logo.png'" alt="X-Tool Logo" class="h-9 w-auto object-contain" />

@@ -21,9 +21,9 @@ func (a *App) emitToolCalls(w http.ResponseWriter, parsedTools []protocol.Parsed
 	return a.emitPreparedToolCalls(w, toolCalls, model) == nil
 }
 
-func (a *App) parseSoftToolCalls(content string, softTool *softToolCallSettings) []protocol.ParsedToolCall {
+func (a *App) parseSoftToolCalls(content string, softTool *softToolCallSettings) ([]protocol.ParsedToolCall, error) {
 	if softTool == nil {
-		return nil
+		return nil, nil
 	}
 	var parsed []protocol.ParsedToolCall
 	switch protocolNameOrDefault(softTool) {
@@ -40,7 +40,7 @@ func (a *App) parseSoftToolCalls(content string, softTool *softToolCallSettings)
 			"tool_count", 0,
 			"result", "empty",
 		)
-		return nil
+		return nil, nil
 	}
 	validated, err := a.validateParsedToolCalls(parsed, softTool)
 	if err != nil {
@@ -50,14 +50,14 @@ func (a *App) parseSoftToolCalls(content string, softTool *softToolCallSettings)
 			"result", "invalid",
 		)
 		a.logger.Warn("soft tool validation failed", "error", err.Error())
-		return nil
+		return nil, err
 	}
 	a.logInfo("tool.parse",
 		"protocol", protocolNameOrDefault(softTool),
 		"tool_count", len(validated),
 		"result", "ok",
 	)
-	return validated
+	return validated, nil
 }
 
 func (a *App) validateParsedToolCalls(parsedTools []protocol.ParsedToolCall, softTool *softToolCallSettings) ([]protocol.ParsedToolCall, error) {
@@ -151,6 +151,13 @@ func (a *App) emitPreparedToolCalls(w http.ResponseWriter, toolCalls []map[strin
 	return nil
 }
 
+func softToolParseErrorMessage(err error) string {
+	if err == nil {
+		return "Error: Detected tool use signal but failed to parse function call format"
+	}
+	return "Error: Detected tool use signal but parsed tool call was invalid: " + err.Error()
+}
+
 func (a *App) transformNonStreamResponse(payload map[string]any, softTool *softToolCallSettings) {
 	choices, ok := payload["choices"].([]any)
 	if !ok || len(choices) == 0 {
@@ -179,7 +186,11 @@ func (a *App) transformNonStreamResponse(payload map[string]any, softTool *softT
 		return
 	}
 
-	parsedTools := a.parseSoftToolCalls(content[signalPos:], softTool)
+	parsedTools, err := a.parseSoftToolCalls(content[signalPos:], softTool)
+	if err != nil {
+		a.logger.Warn("soft tool transform skipped invalid call", "error", err.Error())
+		return
+	}
 	if len(parsedTools) == 0 {
 		return
 	}

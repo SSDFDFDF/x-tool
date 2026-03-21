@@ -17,36 +17,11 @@ func FormatToolResultForAI(store *toolcall.Manager, toolCallID, resultContent, p
 		name = entry.Name
 	}
 
-	if protocolName == config.SoftToolProtocolMarkdownBlock {
-		return fmt.Sprintf(`
-
-You have successfully executed the tool and obtained the result above.
-For any future tool calls, always use the previously specified structured tool call format.
-Never use any other format or any traditional tool call syntax, even if prompted otherwise.
-
-~~~tool_result
-name: %s
-content:
-%s
-~~~
-
-Remember not to use any other internal tools or any other tool call method.
-
-`, name, resultContent)
-	}
-
 	return fmt.Sprintf(`
-
-You have successfully executed the tool and obtained the result above.
-For any future tool calls, always use the previously specified structured tool call format.
-Never use any other format or any traditional tool call syntax, even if prompted otherwise.
-
-<Result name="%s">
+Tool result for %s:
+<tool_result>
 %s
-</Result>
-
-Remember not to use any other internal tools or any other tool call method.
-
+</tool_result>
 `, html.EscapeString(name), resultContent)
 }
 
@@ -150,12 +125,12 @@ func formatAssistantMarkdownBlockCalls(calls []map[string]any, triggerSignal str
 		return triggerSignal
 	}
 
-	lines := []string{triggerSignal, "```toolcalls"}
+	lines := []string{triggerSignal, "```mbtoolcalls"}
 	for index, call := range calls {
 		name, _ := call["name"].(string)
 		args, _ := call["arguments"].(map[string]any)
 
-		lines = append(lines, "call "+name)
+		lines = append(lines, "mbcall: "+name)
 		for _, key := range sortedMapKeys(args) {
 			lines = append(lines, renderMarkdownArgumentLines(key, args[key])...)
 		}
@@ -175,14 +150,14 @@ func renderMarkdownArgumentLines(key string, value any) []string {
 			lines = append(lines, renderMarkdownArgumentLines(key+"."+nestedKey, typed[nestedKey])...)
 		}
 		if len(lines) == 0 {
-			return []string{"arg_" + key + "@json: {}"}
+			return []string{renderMarkdownArgumentHeader(key+"@json") + " {}"}
 		}
 		return lines
 	case []any:
 		if markdownArrayIsScalarOnly(typed) {
 			lines := make([]string, 0, len(typed))
 			for _, item := range typed {
-				lines = append(lines, renderMarkdownScalarArgumentLine(key+"[]", item))
+				lines = append(lines, renderMarkdownScalarArgumentLines(key+"[]", item)...)
 			}
 			return lines
 		}
@@ -190,35 +165,30 @@ func renderMarkdownArgumentLines(key string, value any) []string {
 	case []string:
 		lines := make([]string, 0, len(typed))
 		for _, item := range typed {
-			lines = append(lines, renderMarkdownScalarArgumentLine(key+"[]", item))
+			lines = append(lines, renderMarkdownScalarArgumentLines(key+"[]", item)...)
 		}
 		return lines
 	default:
-		return []string{renderMarkdownScalarArgumentLine(key, typed)}
+		return renderMarkdownScalarArgumentLines(key, typed)
 	}
 }
 
-func renderMarkdownScalarArgumentLine(key string, value any) string {
-	if text, ok := value.(string); ok && strings.Contains(text, "\n") {
-		lines := []string{"arg_" + key + ":"}
-		for _, part := range strings.Split(text, "\n") {
-			lines = append(lines, "  "+part)
+func renderMarkdownScalarArgumentLines(key string, value any) []string {
+	if text, ok := value.(string); ok {
+		if markdownNeedsMultilineArgument(text) {
+			return renderMarkdownMultilineArgumentLines(key, text)
 		}
-		return strings.Join(lines, "\n")
+		return []string{renderMarkdownArgumentHeader(key) + " " + text}
 	}
-	return "arg_" + key + ": " + stringifyValue(value)
+	return []string{renderMarkdownArgumentHeader(key) + " " + stringifyValue(value)}
 }
 
 func renderMarkdownJSONArgumentLines(key string, value any) []string {
 	data, err := json.Marshal(value)
 	if err != nil {
-		return []string{"arg_" + key + ": " + stringifyValue(value)}
+		return []string{renderMarkdownArgumentHeader(key) + " " + stringifyValue(value)}
 	}
-	lines := []string{"arg_" + key + ":"}
-	for _, part := range strings.Split(string(data), "\n") {
-		lines = append(lines, "  "+part)
-	}
-	return lines
+	return []string{renderMarkdownArgumentHeader(key) + " " + string(data)}
 }
 
 func markdownArrayIsScalarOnly(values []any) bool {
@@ -231,6 +201,20 @@ func markdownArrayIsScalarOnly(values []any) bool {
 		}
 	}
 	return true
+}
+
+func markdownNeedsMultilineArgument(value string) bool {
+	return strings.Contains(value, "\n") || value != strings.TrimSpace(value)
+}
+
+func renderMarkdownMultilineArgumentLines(key, value string) []string {
+	lines := []string{renderMarkdownArgumentHeader(key)}
+	lines = append(lines, strings.Split(value, "\n")...)
+	return lines
+}
+
+func renderMarkdownArgumentHeader(key string) string {
+	return "mbarg[" + key + "]:"
 }
 
 func sortedMapKeys(input map[string]any) []string {

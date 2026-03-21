@@ -201,17 +201,21 @@ func (a *App) streamChatCompletion(ctx context.Context, upstreamURL string, requ
 				detector.AppendToBuffer(deltaContent)
 				a.logStreamDebug("chat.completions", "inbound", "tool_parsing_buffer", "buffer", detector.Buffer())
 				if detector.HasCompleteToolTurn() {
-					parsedTools := a.parseSoftToolCalls(detector.Buffer(), softTool)
-					if len(parsedTools) == 0 {
+					parsedTools, err := a.parseSoftToolCalls(detector.Buffer(), softTool)
+					if err != nil {
 						if callbacks.OnError != nil {
-							_ = callbacks.OnError("Error: Detected tool use signal but failed to parse function call format")
+							_ = callbacks.OnError(softToolParseErrorMessage(err))
+						}
+					} else if len(parsedTools) == 0 {
+						if callbacks.OnError != nil {
+							_ = callbacks.OnError(softToolParseErrorMessage(nil))
 						}
 					} else if callbacks.OnToolCalls != nil {
 						toolCalls, err := a.toolCallsFromParsedTools(parsedTools, softTool)
 						if err != nil {
 							a.logger.Warn("soft tool validation failed", "error", err.Error())
 							if callbacks.OnError != nil {
-								_ = callbacks.OnError("Error: Detected tool use signal but parsed tool call did not match the advertised tools")
+								_ = callbacks.OnError(softToolParseErrorMessage(err))
 							}
 						} else {
 							_ = callbacks.OnToolCalls(toolCalls)
@@ -245,18 +249,22 @@ func (a *App) streamChatCompletion(ctx context.Context, upstreamURL string, requ
 	}
 
 	if hasFunctionCall && detector.IsToolParsing() {
-		parsedTools := a.parseSoftToolCalls(detector.Buffer(), softTool)
+		parsedTools, err := a.parseSoftToolCalls(detector.Buffer(), softTool)
 		a.logStreamDebug("chat.completions", "inbound", "stream_finalize_tool_parsing", "parsed_tools", parsedTools, "buffer", detector.Buffer())
-		if len(parsedTools) == 0 {
+		if err != nil {
 			if callbacks.OnError != nil {
-				_ = callbacks.OnError("Error: Detected tool use signal but failed to parse function call format")
+				_ = callbacks.OnError(softToolParseErrorMessage(err))
+			}
+		} else if len(parsedTools) == 0 {
+			if callbacks.OnError != nil {
+				_ = callbacks.OnError(softToolParseErrorMessage(nil))
 			}
 		} else if callbacks.OnToolCalls != nil {
 			toolCalls, err := a.toolCallsFromParsedTools(parsedTools, softTool)
 			if err != nil {
 				a.logger.Warn("soft tool validation failed", "error", err.Error())
 				if callbacks.OnError != nil {
-					_ = callbacks.OnError("Error: Detected tool use signal but parsed tool call did not match the advertised tools")
+					_ = callbacks.OnError(softToolParseErrorMessage(err))
 				}
 			} else {
 				_ = callbacks.OnToolCalls(toolCalls)

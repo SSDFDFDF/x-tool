@@ -380,7 +380,7 @@ func renderMarkdownBlockToolCatalog(tools []protocol.Tool) string {
 	}
 
 	toolBlocks = append(toolBlocks,
-		"Encoding hints:\n- Write arguments as line-start headers prefixed with `arg_`, for example `arg_query: weather`.\n- For nested fields use dot paths, for example `arg_headers.authorization: Bearer token`.\n- Use [] to append array items, for example `arg_tags[]: news`.\n- Use @json only when a value must stay as raw JSON, for example `arg_payload@json:`.\n- For multiline text, write `arg_prompt:` on its own line, then place the value on the following lines. The value continues until the next line-start `arg_...:` line, the next `call ...` line, or the closing fence.",
+		"Encoding hints:\n- Start the fenced block with ```mbtoolcalls and each tool call with `mbcall: tool_name`.\n- Write arguments as line-start headers in bracket form, for example `mbarg[query]: weather`.\n- For nested fields use dot paths inside brackets, for example `mbarg[headers.authorization]: Bearer token`.\n- Use [] to append array items, for example `mbarg[tags[]]: news`.\n- Use @json only when a value must stay as raw JSON, for example `mbarg[payload@json]: {\"mode\":\"strict\"}`.\n- For multiline or exact text, write `mbarg[prompt]:` and continue the value on following lines until the next line-start `mbarg[...]:` line, the next `mbcall:` line, or the closing fence.",
 	)
 
 	return "Available tools:\n" + strings.Join(toolBlocks, "\n\n")
@@ -412,10 +412,10 @@ func buildProtocolRules(protocolName, triggerSignal string) string {
 		return strings.Join([]string{
 			"If no tool is needed, reply with a complete text turn.",
 			"A text turn must be complete on its own. If a tool is needed to answer, continue, or complete the current turn, use a Markdown fenced tool turn in this same turn. Do not output a text turn that says you will call a tool next.",
-			"If a tool is needed, output " + triggerSignal + " alone on its own line, then output exactly one ```toolcalls fenced block.",
-			"Inside the fenced block, start each tool call with `call tool_name`.",
-			"Add arguments with line-start headers prefixed with `arg_`, for example `arg_query: value`.",
-			"For multiline text, write a header such as `arg_prompt:` on its own line and place the value on the following lines. The value continues until the next line-start `arg_...:` line, the next `call ...` line, or the closing fence.",
+			"If a tool is needed, output " + triggerSignal + " alone on its own line, then output exactly one ```mbtoolcalls fenced block.",
+			"Inside the fenced block, start each tool call with `mbcall: tool_name`.",
+			"Add arguments with line-start bracket headers, for example `mbarg[query]: value`.",
+			"For multiline or exact text, write `mbarg[name]:` and continue the value on following lines until the next line-start `mbarg[...]:` line, the next `mbcall:` line, or the closing fence.",
 			"For nested fields use dot paths. For arrays use key[]. Use key@json only when the value must be parsed as JSON.",
 			"The tool name must come from the tool list. Include required parameters. Do not output any text after the closing fence.",
 		}, "\n")
@@ -442,9 +442,9 @@ func buildSingleCallExample(protocolName, triggerSignal string) string {
 	case config.SoftToolProtocolMarkdownBlock:
 		return strings.Join([]string{
 			triggerSignal,
-			"```toolcalls",
-			"call tool_name",
-			"arg_query: value",
+			"```mbtoolcalls",
+			"mbcall: tool_name",
+			"mbarg[query]: value",
 			"```",
 		}, "\n")
 	case config.SoftToolProtocolSentinelJSON:
@@ -470,14 +470,14 @@ func buildMultiCallExample(protocolName, triggerSignal string) string {
 	if protocolName == config.SoftToolProtocolMarkdownBlock {
 		return strings.Join([]string{
 			triggerSignal,
-			"```toolcalls",
-			"call tool_name",
-			"arg_query: value",
+			"```mbtoolcalls",
+			"mbcall: tool_name",
+			"mbarg[query]: value",
 			"",
-			"call tool_name_2",
-			"arg_prompt:",
-			"  value line 1",
-			"  value line 2",
+			"mbcall: tool_name_2",
+			"mbarg[prompt]:",
+			"value line 1",
+			"value line 2",
 			"```",
 		}, "\n")
 	}

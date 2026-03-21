@@ -144,7 +144,7 @@ func ParseFunctionCallsMarkdownBlockWithTools(content, triggerSignal string, too
 
 	cleaned := RemoveThinkBlocks(content)
 	if payload, ok := extractMarkdownToolPayload(cleaned, triggerSignal); ok {
-		if parsed := parseMarkdownToolPayloadWithBoundedArgs(payload, tools); len(parsed) > 0 {
+		if parsed := parseMarkdownToolPayloadMBArgs(payload, tools); len(parsed) > 0 {
 			return parsed
 		}
 	}
@@ -157,9 +157,13 @@ func ParseFunctionCallsMarkdownBlockWithTools(content, triggerSignal string, too
 	return nil
 }
 
-func parseMarkdownToolPayloadWithBoundedArgs(payload string, tools []protocol.Tool) []protocol.ParsedToolCall {
-	lines := strings.Split(strings.ReplaceAll(payload, "\r\n", "\n"), "\n")
-	if len(lines) == 0 {
+func parseMarkdownToolPayloadMBArgs(payload string, tools []protocol.Tool) []protocol.ParsedToolCall {
+	payload = strings.ReplaceAll(strings.ReplaceAll(payload, "\r\n", "\n"), "\r", "\n")
+	tokens := tokenizeMarkdownMBControlTokens(payload)
+	if len(tokens) == 0 {
+		return nil
+	}
+	if strings.TrimSpace(payload[:tokens[0].start]) != "" {
 		return nil
 	}
 
@@ -170,75 +174,219 @@ func parseMarkdownToolPayloadWithBoundedArgs(payload string, tools []protocol.To
 		currentArgs map[string]any
 	)
 
-	flushCurrentCall := func() bool {
-		if currentName == "" {
-			return true
+	for index, token := range tokens {
+		nextStart := len(payload)
+		if index+1 < len(tokens) {
+			nextStart = tokens[index+1].start
 		}
-		parsed = append(parsed, protocol.ParsedToolCall{
-			Name: currentName,
-			Args: currentArgs,
-		})
-		currentName = ""
-		currentArgs = nil
+		body := payload[token.bodyStart:nextStart]
+
+		switch token.kind {
+		case markdownMBControlKindCall:
+			if currentName != "" {
+				parsed = append(parsed, protocol.ParsedToolCall{
+					Name: currentName,
+					Args: currentArgs,
+				})
+			}
+			currentName = strings.TrimSpace(body)
+			if currentName == "" {
+				return nil
+			}
+			currentArgs = map[string]any{}
+		case markdownMBControlKindArg:
+			if currentName == "" {
+				return nil
+			}
+			if !isRecognizedMarkdownArgumentKey(token.arg.key, allowedArgs[currentName]) {
+				return nil
+			}
+			lines := markdownMBValueLines(body)
+			text := strings.Join(lines, "\n")
+			value := any(text)
+			if token.arg.jsonMode {
+				value = coerceJSON(text)
+			} else if len(lines) <= 1 {
+				value = coerceJSON(text)
+			}
+			if !assignMarkdownArgument(currentArgs, token.arg.key, value) {
+				return nil
+			}
+		default:
+			return nil
+		}
+	}
+
+	if currentName == "" {
+		return nil
+	}
+	parsed = append(parsed, protocol.ParsedToolCall{
+		Name: currentName,
+		Args: currentArgs,
+	})
+	return parsed
+}
+
+func trimTrailingEmptyLines(lines []string) []string {
+	end := len(lines)
+	for end > 0 && lines[end-1] == "" {
+		end--
+	}
+	return lines[:end]
+}
+
+type markdownMBControlKind uint8
+
+const (
+	markdownMBControlKindCall markdownMBControlKind = iota + 1
+	markdownMBControlKindArg
+)
+
+type markdownMBArgHeader struct {
+	key         string
+	inlineValue string
+	jsonMode    bool
+}
+
+type markdownMBControlToken struct {
+	kind      markdownMBControlKind
+	start     int
+	bodyStart int
+	arg       markdownMBArgHeader
+}
+
+func tokenizeMarkdownMBControlTokens(payload string) []markdownMBControlToken {
+	if payload == "" {
+		return nil
+	}
+
+	lowered := strings.ToLower(payload)
+	tokens := make([]markdownMBControlToken, 0)
+	for offset := 0; offset < len(payload); {
+		callIndex := strings.Index(lowered[offset:], "mbcall:")
+		argIndex := strings.Index(lowered[offset:], "mbarg[")
+		if callIndex < 0 && argIndex < 0 {
+			break
+		}
+
+		nextStart := len(payload)
+		nextKind := markdownMBControlKind(0)
+		if callIndex >= 0 {
+			nextStart = offset + callIndex
+			nextKind = markdownMBControlKindCall
+		}
+		if argIndex >= 0 && (nextKind == 0 || offset+argIndex < nextStart) {
+			nextStart = offset + argIndex
+			nextKind = markdownMBControlKindArg
+		}
+
+		switch nextKind {
+		case markdownMBControlKindCall:
+			tokens = append(tokens, markdownMBControlToken{
+				kind:      markdownMBControlKindCall,
+				start:     nextStart,
+				bodyStart: nextStart + len("mbcall:"),
+			})
+			offset = nextStart + len("mbcall:")
+		case markdownMBControlKindArg:
+			token, ok := parseMarkdownMBArgToken(payload, lowered, nextStart)
+			if !ok {
+				offset = nextStart + 1
+				continue
+			}
+			tokens = append(tokens, token)
+			offset = token.bodyStart
+		default:
+			return tokens
+		}
+	}
+	return tokens
+}
+
+func parseMarkdownMBArgToken(payload, lowered string, start int) (markdownMBControlToken, bool) {
+	if start < 0 || start >= len(payload) || !strings.HasPrefix(lowered[start:], "mbarg[") {
+		return markdownMBControlToken{}, false
+	}
+
+	remainder := payload[start+len("mbarg["):]
+	keyEnd := strings.Index(remainder, "]:")
+	if keyEnd < 0 {
+		return markdownMBControlToken{}, false
+	}
+
+	key := strings.TrimSpace(remainder[:keyEnd])
+	if key == "" {
+		return markdownMBControlToken{}, false
+	}
+	jsonMode := strings.HasSuffix(key, "@json")
+	if jsonMode {
+		key = strings.TrimSpace(strings.TrimSuffix(key, "@json"))
+	}
+	if key == "" {
+		return markdownMBControlToken{}, false
+	}
+
+	bodyStart := start + len("mbarg[") + keyEnd + 2
+	if bodyStart < len(payload) && payload[bodyStart] == ' ' {
+		bodyStart++
+	}
+
+	return markdownMBControlToken{
+		kind:      markdownMBControlKindArg,
+		start:     start,
+		bodyStart: bodyStart,
+		arg: markdownMBArgHeader{
+			key:      key,
+			jsonMode: jsonMode,
+		},
+	}, true
+}
+
+func markdownMBValueLines(segment string) []string {
+	if strings.HasPrefix(segment, "\n") {
+		segment = segment[1:]
+	}
+	if segment == "" {
+		return nil
+	}
+	return trimTrailingEmptyLines(strings.Split(segment, "\n"))
+}
+
+func markdownAllowedArgsByTool(tools []protocol.Tool) map[string]map[string]struct{} {
+	allowed := make(map[string]map[string]struct{}, len(tools))
+	for _, tool := range tools {
+		params := map[string]struct{}{}
+		properties, _ := normalizedToolParameters(tool.Function.Parameters)["properties"].(map[string]any)
+		for name := range properties {
+			if trimmed := strings.TrimSpace(name); trimmed != "" {
+				params[trimmed] = struct{}{}
+			}
+		}
+		allowed[tool.Function.Name] = params
+	}
+	return allowed
+}
+
+func isRecognizedMarkdownArgumentKey(key string, allowedTopLevel map[string]struct{}) bool {
+	if strings.TrimSpace(key) == "" {
+		return false
+	}
+	if len(allowedTopLevel) == 0 {
 		return true
 	}
 
-	for i := 0; i < len(lines); {
-		line := lines[i]
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			i++
-			continue
-		}
-
-		if name, ok := parseMarkdownCallName(line); ok {
-			if !flushCurrentCall() {
-				return nil
-			}
-			currentName = name
-			currentArgs = map[string]any{}
-			i++
-			continue
-		}
-
-		if currentName == "" {
-			return nil
-		}
-
-		key, inlineValue, ok := parseMarkdownBoundedArgumentHeader(line, allowedArgs[currentName])
-		if !ok {
-			return nil
-		}
-
-		valueLines := make([]string, 0, 4)
-		if inlineValue != "" {
-			valueLines = append(valueLines, inlineValue)
-		}
-
-		j := i + 1
-		for j < len(lines) {
-			nextLine := lines[j]
-			if name, ok := parseMarkdownCallName(nextLine); ok && name != "" {
-				break
-			}
-			if _, _, ok := parseMarkdownBoundedArgumentHeader(nextLine, allowedArgs[currentName]); ok {
-				break
-			}
-			valueLines = append(valueLines, nextLine)
-			j++
-		}
-
-		value := buildMarkdownBoundedArgumentValue(valueLines, inlineValue != "")
-		if !assignMarkdownArgument(currentArgs, normalizeMarkdownBoundedArgumentKey(key), coerceMarkdownBoundedArgumentValue(key, value)) {
-			return nil
-		}
-		i = j
+	base := strings.TrimSpace(key)
+	if strings.HasSuffix(base, "@json") {
+		base = strings.TrimSuffix(base, "@json")
 	}
-
-	if !flushCurrentCall() {
-		return nil
+	if strings.HasSuffix(base, "[]") {
+		base = strings.TrimSuffix(base, "[]")
 	}
-	return parsed
+	if idx := strings.Index(base, "."); idx >= 0 {
+		base = base[:idx]
+	}
+	_, ok := allowedTopLevel[base]
+	return ok
 }
 
 type StreamingFunctionCallDetector struct {
@@ -492,6 +640,9 @@ func extractMarkdownToolPayload(content, triggerSignal string) (string, bool) {
 			cleaned = cleaned[idx+len(triggerSignal):]
 		}
 	}
+	if payload, ok := extractMarkdownNamedFencePayload(cleaned); ok {
+		return payload, true
+	}
 	cleaned = strings.TrimLeft(cleaned, " \t\n")
 	if cleaned == "" {
 		return "", false
@@ -504,6 +655,21 @@ func extractMarkdownToolPayload(content, triggerSignal string) (string, bool) {
 	}
 
 	return extractMarkdownAliasPayload(cleaned)
+}
+
+func extractMarkdownNamedFencePayload(content string) (string, bool) {
+	lowered := strings.ToLower(content)
+	for _, fence := range []string{"```", "~~~"} {
+		opener := fence + "mbtoolcalls"
+		if idx := strings.Index(lowered, opener); idx >= 0 {
+			remainder := content[idx+len(opener):]
+			if strings.HasPrefix(remainder, "\n") {
+				remainder = remainder[1:]
+			}
+			return extractMarkdownFencePayload(remainder, fence)
+		}
+	}
+	return "", false
 }
 
 func parseMarkdownFenceHeader(content string) (string, string, string, bool) {
@@ -535,7 +701,7 @@ func splitFirstLine(content string) (string, string, bool) {
 
 func isMarkdownToolFenceInfo(info string) bool {
 	value := strings.ToLower(strings.TrimSpace(info))
-	return value == "toolcalls" || value == "toolcall" || value == "tool"
+	return value == "mbtoolcalls"
 }
 
 func extractMarkdownFencePayload(content, fence string) (string, bool) {
@@ -561,350 +727,6 @@ func extractMarkdownAliasPayload(content string) (string, bool) {
 		body = append(body, line)
 	}
 	return "", false
-}
-
-func parseMarkdownToolPayload(payload string) []protocol.ParsedToolCall {
-	lines := strings.Split(strings.ReplaceAll(payload, "\r\n", "\n"), "\n")
-	parsed := make([]protocol.ParsedToolCall, 0)
-	var (
-		currentName    string
-		currentArgs    map[string]any
-		pendingArgKey  string
-		pendingArgJSON bool
-		pendingArgYAML bool
-		pendingArgText []string
-	)
-
-	flushPendingArg := func() bool {
-		if pendingArgKey == "" {
-			return true
-		}
-		text := strings.Join(normalizeMarkdownMultilineValue(pendingArgText, pendingArgYAML), "\n")
-		value := any(text)
-		if pendingArgJSON {
-			value = coerceJSON(text)
-		}
-		if !assignMarkdownArgument(currentArgs, pendingArgKey, value) {
-			return false
-		}
-		pendingArgKey = ""
-		pendingArgJSON = false
-		pendingArgYAML = false
-		pendingArgText = nil
-		return true
-	}
-
-	flushCurrentCall := func() bool {
-		if currentName == "" {
-			return true
-		}
-		if !flushPendingArg() {
-			return false
-		}
-		parsed = append(parsed, protocol.ParsedToolCall{
-			Name: currentName,
-			Args: currentArgs,
-		})
-		currentName = ""
-		currentArgs = nil
-		return true
-	}
-
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-
-		if pendingArgKey != "" {
-			if trimmed == "" {
-				pendingArgText = append(pendingArgText, "")
-				continue
-			}
-			if pendingArgYAML {
-				if hasLeadingIndent(line) {
-					pendingArgText = append(pendingArgText, line)
-					continue
-				}
-				if !flushPendingArg() {
-					return nil
-				}
-			}
-			if continuation, ok := markdownArgContinuation(line); ok {
-				pendingArgText = append(pendingArgText, continuation)
-				continue
-			}
-			if !flushPendingArg() {
-				return nil
-			}
-		}
-
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-
-		if name, ok := parseMarkdownCallName(trimmed); ok {
-			if !flushCurrentCall() {
-				return nil
-			}
-			currentName = name
-			currentArgs = map[string]any{}
-			continue
-		}
-
-		if currentName == "" {
-			return nil
-		}
-
-		key, value, multiline, jsonMode, yamlBlock, ok := parseMarkdownArgument(trimmed)
-		if !ok {
-			return nil
-		}
-		if multiline {
-			pendingArgKey = key
-			pendingArgJSON = jsonMode
-			pendingArgYAML = yamlBlock
-			pendingArgText = nil
-			continue
-		}
-		if jsonMode {
-			if !assignMarkdownArgument(currentArgs, key, coerceJSON(value)) {
-				return nil
-			}
-			continue
-		}
-		if !assignMarkdownArgument(currentArgs, key, coerceJSON(value)) {
-			return nil
-		}
-	}
-
-	if !flushCurrentCall() {
-		return nil
-	}
-	return parsed
-}
-
-func parseMarkdownCallName(line string) (string, bool) {
-	switch {
-	case strings.HasPrefix(strings.ToLower(line), "call "):
-		name := strings.TrimSpace(line[len("call "):])
-		return name, name != ""
-	case strings.HasPrefix(strings.ToLower(line), "call:"):
-		name := strings.TrimSpace(line[len("call:"):])
-		return name, name != ""
-	default:
-		return "", false
-	}
-}
-
-func parseMarkdownArgument(line string) (string, string, bool, bool, bool, bool) {
-	var remainder string
-	switch {
-	case strings.HasPrefix(strings.ToLower(line), "arg "):
-		remainder = strings.TrimSpace(line[len("arg "):])
-	case strings.HasPrefix(strings.ToLower(line), "arg:"):
-		remainder = strings.TrimSpace(line[len("arg:"):])
-	default:
-		return "", "", false, false, false, false
-	}
-
-	colon := strings.Index(remainder, ":")
-	if colon < 0 {
-		return "", "", false, false, false, false
-	}
-
-	key := strings.TrimSpace(remainder[:colon])
-	value := strings.TrimSpace(remainder[colon+1:])
-	if key == "" {
-		return "", "", false, false, false, false
-	}
-
-	jsonMode := strings.HasSuffix(key, "@json")
-	if jsonMode {
-		key = strings.TrimSuffix(key, "@json")
-	}
-	key = strings.TrimSpace(key)
-	if key == "" {
-		return "", "", false, false, false, false
-	}
-
-	if value == "" {
-		return key, "", true, jsonMode, false, true
-	}
-	if value == "|" || value == "|-" || value == "|+" {
-		return key, "", true, jsonMode, true, true
-	}
-	return key, value, false, jsonMode, false, true
-}
-
-func markdownArgContinuation(line string) (string, bool) {
-	trimmed := strings.TrimLeft(line, " \t")
-	if !strings.HasPrefix(trimmed, "|") {
-		return "", false
-	}
-	value := strings.TrimPrefix(trimmed, "|")
-	if strings.HasPrefix(value, " ") {
-		value = value[1:]
-	}
-	return value, true
-}
-
-func parseMarkdownBoundedArgumentHeader(line string, allowedTopLevel map[string]struct{}) (string, string, bool) {
-	if line == "" || hasLeadingIndent(line) || !strings.HasPrefix(strings.ToLower(line), "arg_") {
-		return "", "", false
-	}
-
-	remainder := line[len("arg_"):]
-	colon := strings.Index(remainder, ":")
-	if colon < 0 {
-		return "", "", false
-	}
-
-	key := strings.TrimSpace(remainder[:colon])
-	if key == "" || !isRecognizedMarkdownArgumentKey(key, allowedTopLevel) {
-		return "", "", false
-	}
-	return key, strings.TrimSpace(remainder[colon+1:]), true
-}
-
-func markdownAllowedArgsByTool(tools []protocol.Tool) map[string]map[string]struct{} {
-	allowed := make(map[string]map[string]struct{}, len(tools))
-	for _, tool := range tools {
-		params := map[string]struct{}{}
-		properties, _ := normalizedToolParameters(tool.Function.Parameters)["properties"].(map[string]any)
-		for name := range properties {
-			if trimmed := strings.TrimSpace(name); trimmed != "" {
-				params[trimmed] = struct{}{}
-			}
-		}
-		allowed[tool.Function.Name] = params
-	}
-	return allowed
-}
-
-func isRecognizedMarkdownArgumentKey(key string, allowedTopLevel map[string]struct{}) bool {
-	if strings.TrimSpace(key) == "" {
-		return false
-	}
-	if len(allowedTopLevel) == 0 {
-		return true
-	}
-
-	base := strings.TrimSpace(key)
-	if strings.HasSuffix(base, "@json") {
-		base = strings.TrimSuffix(base, "@json")
-	}
-	if strings.HasSuffix(base, "[]") {
-		base = strings.TrimSuffix(base, "[]")
-	}
-	if idx := strings.Index(base, "."); idx >= 0 {
-		base = base[:idx]
-	}
-	_, ok := allowedTopLevel[base]
-	return ok
-}
-
-func buildMarkdownBoundedArgumentValue(lines []string, hasInlineValue bool) string {
-	if len(lines) == 0 {
-		return ""
-	}
-
-	if hasInlineValue {
-		if len(lines) == 1 {
-			return lines[0]
-		}
-		rest := normalizeMarkdownMultilineValue(trimTrailingBlankLines(lines[1:]), true)
-		return strings.TrimRight(strings.Join(append([]string{lines[0]}, rest...), "\n"), "\n")
-	}
-
-	normalized := normalizeMarkdownMultilineValue(trimTrailingBlankLines(lines), true)
-	return strings.TrimRight(strings.Join(normalized, "\n"), "\n")
-}
-
-func trimTrailingBlankLines(lines []string) []string {
-	end := len(lines)
-	for end > 0 && strings.TrimSpace(lines[end-1]) == "" {
-		end--
-	}
-	return lines[:end]
-}
-
-func coerceMarkdownBoundedArgumentValue(key, value string) any {
-	if strings.HasSuffix(strings.TrimSpace(key), "@json") {
-		return coerceJSON(value)
-	}
-	if strings.Contains(value, "\n") {
-		return value
-	}
-	return coerceJSON(value)
-}
-
-func normalizeMarkdownBoundedArgumentKey(key string) string {
-	normalized := strings.TrimSpace(key)
-	if strings.HasSuffix(normalized, "@json") {
-		normalized = strings.TrimSuffix(normalized, "@json")
-	}
-	return normalized
-}
-
-func normalizeMarkdownMultilineValue(lines []string, yamlBlock bool) []string {
-	if !yamlBlock || len(lines) == 0 {
-		return lines
-	}
-
-	minIndent := -1
-	for _, line := range lines {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		indent := leadingIndentWidth(line)
-		if minIndent < 0 || indent < minIndent {
-			minIndent = indent
-		}
-	}
-	if minIndent <= 0 {
-		return lines
-	}
-
-	normalized := make([]string, 0, len(lines))
-	for _, line := range lines {
-		if strings.TrimSpace(line) == "" {
-			normalized = append(normalized, "")
-			continue
-		}
-		normalized = append(normalized, trimLeadingIndent(line, minIndent))
-	}
-	return normalized
-}
-
-func hasLeadingIndent(line string) bool {
-	if line == "" {
-		return false
-	}
-	return line[0] == ' ' || line[0] == '\t'
-}
-
-func leadingIndentWidth(line string) int {
-	width := 0
-	for width < len(line) {
-		if line[width] != ' ' && line[width] != '\t' {
-			break
-		}
-		width++
-	}
-	return width
-}
-
-func trimLeadingIndent(line string, width int) string {
-	if width <= 0 {
-		return line
-	}
-	index := 0
-	for index < len(line) && width > 0 {
-		if line[index] != ' ' && line[index] != '\t' {
-			break
-		}
-		index++
-		width--
-	}
-	return line[index:]
 }
 
 func assignMarkdownArgument(target map[string]any, key string, value any) bool {

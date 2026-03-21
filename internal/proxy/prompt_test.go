@@ -405,10 +405,10 @@ func TestGenerateFunctionPromptUsesMarkdownBlockDefaultTemplate(t *testing.T) {
 	if !strings.Contains(prompt, "Reply in one of two modes only: a complete text turn, or a single Markdown fenced tool turn") {
 		t.Fatalf("expected markdown block prompt template, got %q", prompt)
 	}
-	if !strings.Contains(prompt, "```toolcalls") || !strings.Contains(prompt, "call tool_name") || !strings.Contains(prompt, "arg_query: value") {
+	if !strings.Contains(prompt, "```mbtoolcalls") || !strings.Contains(prompt, "mbcall: tool_name") || !strings.Contains(prompt, "mbarg[query]: value") {
 		t.Fatalf("expected markdown block example in prompt, got %q", prompt)
 	}
-	if !strings.Contains(prompt, "Write arguments as line-start headers prefixed with `arg_`, for example `arg_query: weather`.") || !strings.Contains(prompt, "Use [] to append array items") || !strings.Contains(prompt, "Use @json only when a value must stay as raw JSON") {
+	if !strings.Contains(prompt, "Start the fenced block with ```mbtoolcalls and each tool call with `mbcall: tool_name`.") || !strings.Contains(prompt, "Write arguments as line-start headers in bracket form, for example `mbarg[query]: weather`.") || !strings.Contains(prompt, "For multiline or exact text, write `mbarg[prompt]:` and continue the value on following lines") {
 		t.Fatalf("expected markdown encoding hints in tool catalog, got %q", prompt)
 	}
 	if !strings.Contains(prompt, "required args: query(string) - search query") {

@@ -1,35 +1,22 @@
-import type { Ref } from 'vue'
-import { ref, computed } from 'vue'
-import { showMessage } from '../utils/message'
+import { computed, ref, type Ref } from 'vue'
 import type { UpstreamFormModel, ConfigFormModel } from '../types/config'
+import { showMessage } from '../utils/message'
 
 export type PromptInjectionTarget = 'auto' | 'message' | 'system' | 'instructions'
 export type UpstreamProtocol = 'openai_compat' | 'responses' | 'anthropic'
+export type RoleOption = { value: string; label: string }
 
 export type UpstreamModelsSyncResponse = {
   status: string
   models: string[]
 }
 
-export type RoleOption = { value: string; label: string }
-
-// 协议选项
 export const upstreamProtocolOptions: Array<{ value: UpstreamProtocol; label: string; desc: string }> = [
   { value: 'openai_compat', label: 'OpenAI 兼容', desc: '转为 Chat Completions 格式，支持所有入口协议' },
   { value: 'responses', label: 'Responses', desc: '原生透传 Responses API，仅接受 /v1/responses 入口' },
   { value: 'anthropic', label: 'Anthropic', desc: '原生透传 Anthropic Messages API，仅接受 /v1/messages 入口' }
 ]
 
-// 全局 target 选项（不区分协议）
-export const globalPromptInjectionTargetOptions: Array<{ value: PromptInjectionTarget | ''; label: string }> = [
-  { value: '', label: '默认 (auto)' },
-  { value: 'auto', label: 'auto' },
-  { value: 'message', label: 'message' },
-  { value: 'system', label: 'system' },
-  { value: 'instructions', label: 'instructions' }
-]
-
-// 工具函数
 export const normalizePromptInjectionTarget = (value: string): PromptInjectionTarget | '' => {
   if (value === 'auto' || value === 'message' || value === 'system' || value === 'instructions') {
     return value
@@ -54,7 +41,6 @@ export const getPromptInjectionRoleMode = (value: string) => {
   return 'custom'
 }
 
-// 按上游协议返回合法的 target 选项
 export const targetOptionsForProtocol = (protocol: string): Array<{ value: string; label: string; desc: string }> => {
   switch (protocol) {
     case 'openai_compat':
@@ -82,7 +68,6 @@ export const targetOptionsForProtocol = (protocol: string): Array<{ value: strin
   }
 }
 
-// 按上游协议 + target 返回合法的 role 选项
 export const roleOptionsForProtocol = (protocol: string, target: string): RoleOption[] => {
   const inherit: RoleOption = { value: '', label: '默认 / 继承' }
   const effectiveTarget = target || 'auto'
@@ -124,24 +109,23 @@ export const roleOptionsForProtocol = (protocol: string, target: string): RoleOp
   }
 }
 
-// 协议切换时自动修正不兼容的 target/role
 export const onUpstreamProtocolChange = (upstream: UpstreamFormModel) => {
   const protocol = upstream.upstreamProtocol || 'openai_compat'
-  const validTargets = targetOptionsForProtocol(protocol).map((o) => o.value)
+  const validTargets = targetOptionsForProtocol(protocol).map((option) => option.value)
   if (!validTargets.includes(upstream.promptInjectionTarget)) {
     upstream.promptInjectionTarget = validTargets[0] ?? ''
   }
-  const validRoles = roleOptionsForProtocol(protocol, upstream.promptInjectionTarget).map((o) => o.value)
+
+  const validRoles = roleOptionsForProtocol(protocol, upstream.promptInjectionTarget).map((option) => option.value)
   const currentMode = getPromptInjectionRoleMode(upstream.promptInjectionRole)
   if (!validRoles.includes(currentMode)) {
     upstream.promptInjectionRole = ''
   }
 }
 
-// target 切换时自动修正不兼容的 role
 export const onUpstreamTargetChange = (upstream: UpstreamFormModel) => {
   const protocol = upstream.upstreamProtocol || 'openai_compat'
-  const validRoles = roleOptionsForProtocol(protocol, upstream.promptInjectionTarget).map((o) => o.value)
+  const validRoles = roleOptionsForProtocol(protocol, upstream.promptInjectionTarget).map((option) => option.value)
   const currentMode = getPromptInjectionRoleMode(upstream.promptInjectionRole)
   if (!validRoles.includes(currentMode)) {
     upstream.promptInjectionRole = ''
@@ -156,43 +140,17 @@ export const updatePromptInjectionRoleMode = (mode: string, onUpdate: (next: str
   onUpdate(mode)
 }
 
-// 模型同步相关
-export const syncedModelSet = (upstream: UpstreamFormModel) => new Set(upstream.syncedModels)
-
-export const selectedSyncedModels = (upstream: UpstreamFormModel) => {
-  const managed = syncedModelSet(upstream)
-  return splitNonEmptyLines(upstream.modelsText).filter((modelID) => managed.has(modelID))
+export const generateRandomKey = (): string => {
+  const bytes = new Uint8Array(32)
+  crypto.getRandomValues(bytes)
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+  return `sk-${hex}`
 }
 
-export const selectedSyncedModelsCount = (upstream: UpstreamFormModel) => selectedSyncedModels(upstream).length
-
-export const isSyncedModelSelected = (upstream: UpstreamFormModel, modelID: string) =>
-  selectedSyncedModels(upstream).includes(modelID)
-
-export const applySyncedModelSelection = (upstream: UpstreamFormModel, nextSelected: string[]) => {
-  const managed = syncedModelSet(upstream)
-  const manualEntries = splitNonEmptyLines(upstream.modelsText).filter((entry) => !managed.has(entry))
-  const selectedSet = new Set(nextSelected)
-  const selectedInDisplayOrder = upstream.syncedModels.filter((modelID) => selectedSet.has(modelID))
-  upstream.modelsText = [...manualEntries, ...selectedInDisplayOrder].join('\n')
-}
-
-export const updateSyncedModelSelection = (upstream: UpstreamFormModel, modelID: string, checked: boolean) => {
-  const next = new Set(selectedSyncedModels(upstream))
-  if (checked) {
-    next.add(modelID)
-  } else {
-    next.delete(modelID)
-  }
-  applySyncedModelSelection(upstream, Array.from(next))
-}
-
-export const selectAllSyncedModels = (upstream: UpstreamFormModel) => {
-  applySyncedModelSelection(upstream, upstream.syncedModels)
-}
-
-export const clearSyncedModelSelection = (upstream: UpstreamFormModel) => {
-  applySyncedModelSelection(upstream, [])
+export const appendRandomClientKey = (upstream: UpstreamFormModel) => {
+  const key = generateRandomKey()
+  const current = upstream.clientKeysText.trim()
+  upstream.clientKeysText = current ? `${current}\n${key}` : key
 }
 
 export const syncUpstreamModels = async (upstream: UpstreamFormModel) => {
@@ -243,57 +201,182 @@ export const syncUpstreamModels = async (upstream: UpstreamFormModel) => {
   }
 }
 
-// 面板展开状态
-export const getUpstreamPanelKey = (upstream: UpstreamFormModel, idx: number) =>
-  upstream.originalName.trim() || `draft:${idx}`
+export const syncedModelSet = (upstream: UpstreamFormModel) => new Set(upstream.syncedModels)
 
-export const syncExpandedUpstreamPanels = (
-  form: ConfigFormModel,
-  expandedPanels: Ref<Record<string, boolean>>,
-  defaultExpanded: boolean = true
-) => {
-  const nextState: Record<string, boolean> = {}
-  form.upstreams.forEach((upstream, idx) => {
-    const key = getUpstreamPanelKey(upstream, idx)
-    nextState[key] = expandedPanels.value[key] ?? defaultExpanded
-  })
-  expandedPanels.value = nextState
+export const selectedSyncedModels = (upstream: UpstreamFormModel) => {
+  const managed = syncedModelSet(upstream)
+  return splitNonEmptyLines(upstream.modelsText).filter((modelID) => managed.has(modelID))
 }
 
-export const isUpstreamExpanded = (upstream: UpstreamFormModel, idx: number, expandedPanels: Ref<Record<string, boolean>>, defaultExpanded: boolean = true) =>
-  expandedPanels.value[getUpstreamPanelKey(upstream, idx)] ?? defaultExpanded
+export const selectedSyncedModelsCount = (upstream: UpstreamFormModel) => selectedSyncedModels(upstream).length
 
-export const toggleUpstreamExpanded = (upstream: UpstreamFormModel, idx: number, expandedPanels: Ref<Record<string, boolean>>, defaultExpanded: boolean = true) => {
-  const key = getUpstreamPanelKey(upstream, idx)
-  expandedPanels.value = {
-    ...expandedPanels.value,
-    [key]: !isUpstreamExpanded(upstream, idx, expandedPanels, defaultExpanded)
+export const isSyncedModelSelected = (upstream: UpstreamFormModel, modelID: string) =>
+  selectedSyncedModels(upstream).includes(modelID)
+
+export const applySyncedModelSelection = (upstream: UpstreamFormModel, nextSelected: string[]) => {
+  const managed = syncedModelSet(upstream)
+  const manualEntries = splitNonEmptyLines(upstream.modelsText).filter((entry) => !managed.has(entry))
+  const selectedSet = new Set(nextSelected)
+  const selectedInDisplayOrder = upstream.syncedModels.filter((modelID) => selectedSet.has(modelID))
+  upstream.modelsText = [...manualEntries, ...selectedInDisplayOrder].join('\n')
+}
+
+export const updateSyncedModelSelection = (upstream: UpstreamFormModel, modelID: string, checked: boolean) => {
+  const next = new Set(selectedSyncedModels(upstream))
+  if (checked) {
+    next.add(modelID)
+  } else {
+    next.delete(modelID)
   }
+  applySyncedModelSelection(upstream, Array.from(next))
 }
 
-// 协议和配置获取
+export const selectAllSyncedModels = (upstream: UpstreamFormModel) => {
+  applySyncedModelSelection(upstream, upstream.syncedModels)
+}
+
+export const clearSyncedModelSelection = (upstream: UpstreamFormModel) => {
+  applySyncedModelSelection(upstream, [])
+}
+
 export const getEffectiveUpstreamProtocol = (upstream: UpstreamFormModel) =>
   upstream.upstreamProtocol.trim() || 'openai_compat'
 
-export const getFeaturePromptInjectionTargetLabel = (value: string) =>
-  normalizePromptInjectionTarget(value) || 'auto'
+export const getEffectiveUpstreamPromptInjectionTarget = (upstream: UpstreamFormModel, globalTarget?: string) =>
+  normalizePromptInjectionTarget(upstream.promptInjectionTarget) || normalizePromptInjectionTarget(globalTarget ?? '') || 'auto'
 
-export const getEffectiveUpstreamPromptInjectionTarget = (upstream: UpstreamFormModel, globalTarget: string = '') =>
-  normalizePromptInjectionTarget(upstream.promptInjectionTarget) || getFeaturePromptInjectionTargetLabel(globalTarget)
+export const getEffectiveSoftToolPromptProfileBinding = (
+  upstream: UpstreamFormModel,
+  defaultProfileID?: string
+) => upstream.softToolPromptProfileID.trim() || defaultProfileID?.trim() || '无'
 
-export const getEffectiveSoftToolPromptProfileBinding = (upstream: UpstreamFormModel, defaultProfileID: string = '') =>
-  upstream.softToolPromptProfileID.trim() || defaultProfileID.trim() || '无'
+export const compareUpstreamByID = (a: UpstreamFormModel, b: UpstreamFormModel) => {
+  const readRawID = (upstream: UpstreamFormModel) => {
+    const maybeID = (upstream as UpstreamFormModel & { id?: number | string }).id
+    if (maybeID !== undefined && maybeID !== null && String(maybeID).trim() !== '') {
+      return String(maybeID).trim()
+    }
+    return upstream.name.trim() || upstream.originalName.trim()
+  }
 
-// 密钥生成
-export const generateRandomKey = (): string => {
-  const bytes = new Uint8Array(32)
-  crypto.getRandomValues(bytes)
-  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
-  return `sk-${hex}`
+  const aRaw = readRawID(a)
+  const bRaw = readRawID(b)
+
+  const aNum = Number(aRaw)
+  const bNum = Number(bRaw)
+  const aIsNum = aRaw !== '' && Number.isFinite(aNum)
+  const bIsNum = bRaw !== '' && Number.isFinite(bNum)
+
+  if (aIsNum && bIsNum) {
+    return aNum - bNum
+  }
+  if (aIsNum && !bIsNum) {
+    return -1
+  }
+  if (!aIsNum && bIsNum) {
+    return 1
+  }
+
+  return aRaw.localeCompare(bRaw, 'zh-CN', { numeric: true, sensitivity: 'base' })
 }
 
-export const appendRandomClientKey = (upstream: UpstreamFormModel) => {
-  const key = generateRandomKey()
-  const current = upstream.clientKeysText.trim()
-  upstream.clientKeysText = current ? `${current}\n${key}` : key
+export const sortUpstreamsByID = (form: ConfigFormModel) => {
+  form.upstreams.sort(compareUpstreamByID)
+}
+
+export const getUpstreamPanelKey = (upstream: UpstreamFormModel, idx: number) =>
+  upstream.originalName.trim() || `draft:${idx}`
+
+export const useUpstreamPanelState = (configForm: Ref<ConfigFormModel | null>) => {
+  const expandedPanels = ref<Record<string, boolean>>({})
+
+  const syncExpandedPanels = (form: ConfigFormModel, defaultExpanded = false) => {
+    const nextState: Record<string, boolean> = {}
+    form.upstreams.forEach((upstream, idx) => {
+      const key = getUpstreamPanelKey(upstream, idx)
+      nextState[key] = expandedPanels.value[key] ?? defaultExpanded
+    })
+    expandedPanels.value = nextState
+  }
+
+  const isExpanded = (upstream: UpstreamFormModel, idx: number) =>
+    expandedPanels.value[getUpstreamPanelKey(upstream, idx)] ?? false
+
+  const toggle = (upstream: UpstreamFormModel, idx: number) => {
+    const key = getUpstreamPanelKey(upstream, idx)
+    expandedPanels.value = {
+      ...expandedPanels.value,
+      [key]: !isExpanded(upstream, idx)
+    }
+  }
+
+  const expandAll = () => {
+    if (!configForm.value) return
+    const nextState: Record<string, boolean> = {}
+    configForm.value.upstreams.forEach((upstream, idx) => {
+      nextState[getUpstreamPanelKey(upstream, idx)] = true
+    })
+    expandedPanels.value = nextState
+  }
+
+  const collapseAll = () => {
+    if (!configForm.value) return
+    const nextState: Record<string, boolean> = {}
+    configForm.value.upstreams.forEach((upstream, idx) => {
+      nextState[getUpstreamPanelKey(upstream, idx)] = false
+    })
+    expandedPanels.value = nextState
+  }
+
+  const setExpanded = (upstream: UpstreamFormModel, idx: number, value: boolean) => {
+    const key = getUpstreamPanelKey(upstream, idx)
+    expandedPanels.value = {
+      ...expandedPanels.value,
+      [key]: value
+    }
+  }
+
+  return {
+    expandedPanels,
+    syncExpandedPanels,
+    isExpanded,
+    toggle,
+    expandAll,
+    collapseAll,
+    setExpanded
+  }
+}
+
+export const useSoftToolPromptProfileOptions = (configForm: Ref<ConfigFormModel | null>) => {
+  return computed(() => {
+    if (!configForm.value) {
+      return [] as Array<{ value: string; label: string; enabled: boolean; protocol: string }>
+    }
+    return configForm.value.promptProfiles.map((profile) => ({
+      value: profile.id,
+      label: profile.name.trim() || profile.id.trim() || '未命名 profile',
+      enabled: Boolean(profile.enabled),
+      protocol: profile.protocol.trim()
+    }))
+  })
+}
+
+export const useUpstreamStats = (configForm: Ref<ConfigFormModel | null>) => {
+  const totalModelsCount = computed(() => {
+    if (!configForm.value) return 0
+    return configForm.value.upstreams.reduce(
+      (sum, upstream) => sum + countNonEmptyLines(upstream.modelsText),
+      0
+    )
+  })
+
+  const defaultUpstreamsCount = computed(() => {
+    if (!configForm.value) return 0
+    return configForm.value.upstreams.filter((upstream) => upstream.isDefault).length
+  })
+
+  return {
+    totalModelsCount,
+    defaultUpstreamsCount
+  }
 }

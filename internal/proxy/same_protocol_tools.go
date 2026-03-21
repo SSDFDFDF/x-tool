@@ -365,7 +365,12 @@ func (a *App) transformResponsesResponse(payload map[string]any, softTool *softT
 			continue
 		}
 
-		parsedTools := a.parseSoftToolCalls(content[signalPos:], softTool)
+		parsedTools, err := a.parseSoftToolCalls(content[signalPos:], softTool)
+		if err != nil {
+			a.logger.Warn("soft tool transform skipped invalid responses message", "error", err.Error())
+			output = append(output, protocol.CloneMap(item))
+			continue
+		}
 		if len(parsedTools) == 0 {
 			output = append(output, protocol.CloneMap(item))
 			continue
@@ -505,7 +510,12 @@ func (a *App) transformAnthropicResponse(payload map[string]any, softTool *softT
 			content = append(content, protocol.CloneMap(block))
 			continue
 		}
-		parsedTools := a.parseSoftToolCalls(text[signalPos:], softTool)
+		parsedTools, err := a.parseSoftToolCalls(text[signalPos:], softTool)
+		if err != nil {
+			a.logger.Warn("soft tool transform skipped invalid anthropic block", "error", err.Error())
+			content = append(content, protocol.CloneMap(block))
+			continue
+		}
 		if len(parsedTools) == 0 {
 			content = append(content, protocol.CloneMap(block))
 			continue
