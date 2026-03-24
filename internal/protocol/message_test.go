@@ -73,6 +73,22 @@ func TestFormatAssistantToolCallsForAISentinelJSONWrapsSingleCall(t *testing.T) 
 	}
 }
 
+func TestFormatAssistantToolCallsForAISentinelJSONRepairsMalformedArguments(t *testing.T) {
+	toolCalls := []any{
+		map[string]any{
+			"function": map[string]any{
+				"name":      "search",
+				"arguments": `{q:'go',}`,
+			},
+		},
+	}
+
+	result := FormatAssistantToolCallsForAI(toolCalls, "<Function_Test_Start>", config.SoftToolProtocolSentinelJSON)
+	if !strings.Contains(result, `"arguments":{"q":"go"}`) {
+		t.Fatalf("expected malformed arguments to be repaired into an object, got %s", result)
+	}
+}
+
 func TestFormatAssistantToolCallsForAIWrapsXMLCallsInFunctionCallsBlock(t *testing.T) {
 	toolCalls := []any{
 		map[string]any{

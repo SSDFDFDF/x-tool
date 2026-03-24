@@ -76,6 +76,47 @@ func TestParseFunctionCallsSentinelJSONParsesSingleCall(t *testing.T) {
 	}
 }
 
+func TestParseFunctionCallsSentinelJSONRepairsMalformedSingleCall(t *testing.T) {
+	trigger := "<Function_Test_Start>"
+	input := trigger + `
+<TOOL_CALL>
+{name:'search',arguments:{query:'weather',},}
+</TOOL_CALL>`
+
+	parsed := ParseFunctionCallsSentinelJSON(input, trigger)
+	if len(parsed) != 1 {
+		t.Fatalf("expected 1 repaired tool call, got %#v", parsed)
+	}
+	if parsed[0].Name != "search" {
+		t.Fatalf("expected tool name search, got %q", parsed[0].Name)
+	}
+	if parsed[0].Args["query"] != "weather" {
+		t.Fatalf("expected repaired query argument, got %#v", parsed[0].Args["query"])
+	}
+}
+
+func TestParseFunctionCallsSentinelJSONRepairsMalformedMultipleCalls(t *testing.T) {
+	trigger := "<Function_Test_Start>"
+	input := trigger + `
+<TOOL_CALLS>
+[{name:'search',arguments:{query:'weather'}},{name:'write_file',arguments:{path:'/tmp/out.txt',content:'hello',},},]
+</TOOL_CALLS>`
+
+	parsed := ParseFunctionCallsSentinelJSON(input, trigger)
+	if len(parsed) != 2 {
+		t.Fatalf("expected 2 repaired tool calls, got %#v", parsed)
+	}
+	if parsed[0].Name != "search" || parsed[1].Name != "write_file" {
+		t.Fatalf("expected search then write_file, got %#v", parsed)
+	}
+	if parsed[0].Args["query"] != "weather" {
+		t.Fatalf("expected repaired first tool query argument, got %#v", parsed[0].Args["query"])
+	}
+	if parsed[1].Args["path"] != "/tmp/out.txt" || parsed[1].Args["content"] != "hello" {
+		t.Fatalf("expected repaired second tool arguments, got %#v", parsed[1].Args)
+	}
+}
+
 func TestParseFunctionCallsXMLParsesMultipleInvokesFromFunctionCallsBlock(t *testing.T) {
 	trigger := "<Function_Test_Start>"
 	input := trigger + `

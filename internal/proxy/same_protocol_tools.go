@@ -535,7 +535,7 @@ func (a *App) transformAnthropicResponse(payload map[string]any, softTool *softT
 			functionInfo, _ := toolCall["function"].(map[string]any)
 			var input map[string]any
 			if arguments, _ := functionInfo["arguments"].(string); arguments != "" {
-				_ = json.Unmarshal([]byte(arguments), &input)
+				_ = protocol.UnmarshalJSONWithRepair(arguments, &input)
 			}
 			content = append(content, map[string]any{
 				"type":  "tool_use",

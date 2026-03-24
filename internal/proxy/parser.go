@@ -545,7 +545,7 @@ func parseSentinelJSONPayload(payload string, expectArray bool) []protocol.Parse
 
 	if expectArray {
 		var rawCalls []rawToolCall
-		if err := json.Unmarshal([]byte(payload), &rawCalls); err != nil {
+		if !protocol.UnmarshalJSONWithRepair(payload, &rawCalls) {
 			return nil
 		}
 		parsed := make([]protocol.ParsedToolCall, 0, len(rawCalls))
@@ -562,7 +562,7 @@ func parseSentinelJSONPayload(payload string, expectArray bool) []protocol.Parse
 	}
 
 	var rawCall rawToolCall
-	if err := json.Unmarshal([]byte(payload), &rawCall); err != nil {
+	if !protocol.UnmarshalJSONWithRepair(payload, &rawCall) {
 		return nil
 	}
 	if strings.TrimSpace(rawCall.Name) == "" {

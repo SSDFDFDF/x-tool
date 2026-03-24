@@ -13,16 +13,17 @@ import (
 
 func FormatToolResultForAI(store *toolcall.Manager, toolCallID, resultContent, protocolName string) string {
 	name := "Unknown"
+	id := ""
 	if entry, ok := store.Get(toolCallID); ok {
 		name = entry.Name
+		id = entry.ID
 	}
 
 	return fmt.Sprintf(`
-Tool result for %s:
-<tool_result>
+<tool_result name="%s" id="%s">
 %s
 </tool_result>
-`, html.EscapeString(name), resultContent)
+`, html.EscapeString(name), html.EscapeString(id), resultContent)
 }
 
 func FormatAssistantToolCallsForAI(toolCalls []any, triggerSignal, protocolName string) string {
@@ -41,7 +42,7 @@ func FormatAssistantToolCallsForAI(toolCalls []any, triggerSignal, protocolName 
 		switch value := argumentsRaw.(type) {
 		case string:
 			var parsed any
-			if err := json.Unmarshal([]byte(value), &parsed); err != nil {
+			if !UnmarshalJSONWithRepair(value, &parsed) {
 				args["content"] = value
 			} else if dict, ok := parsed.(map[string]any); ok {
 				args = dict

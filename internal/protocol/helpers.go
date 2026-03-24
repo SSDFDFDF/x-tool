@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/kaptinlin/jsonrepair"
 )
 
 var ErrMissingAuthorization = errors.New("missing authorization header")
@@ -25,6 +27,21 @@ func mustJSON(value any) string {
 		return "{}"
 	}
 	return string(data)
+}
+
+func UnmarshalJSONWithRepair(payload string, target any) bool {
+	if err := json.Unmarshal([]byte(payload), target); err == nil {
+		return true
+	}
+
+	repaired, err := jsonrepair.JSONRepair(payload)
+	if err != nil {
+		return false
+	}
+	if strings.TrimSpace(repaired) == "" {
+		return false
+	}
+	return json.Unmarshal([]byte(repaired), target) == nil
 }
 
 func nilIfEmpty(value string) any {

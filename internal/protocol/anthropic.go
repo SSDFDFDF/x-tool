@@ -317,7 +317,7 @@ func ConvertChatCompletionToAnthropic(payload map[string]any, model string) map[
 					name, _ := functionInfo["name"].(string)
 					arguments, _ := functionInfo["arguments"].(string)
 					var input map[string]any
-					_ = json.Unmarshal([]byte(arguments), &input)
+					_ = UnmarshalJSONWithRepair(arguments, &input)
 					contentBlocks = append(contentBlocks, map[string]any{
 						"type":  "tool_use",
 						"id":    toolCall["id"],
