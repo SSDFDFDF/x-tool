@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"x-tool/internal/config"
@@ -25,10 +26,12 @@ type chatStreamCallbacks struct {
 }
 
 type softToolCallSettings struct {
-	Protocol   string
-	Trigger    string
-	Tools      []protocol.Tool
-	ToolChoice any
+	Protocol            string
+	Trigger             string
+	Tools               []protocol.Tool
+	ToolChoice          any
+	validationRulesOnce sync.Once
+	validationRules     map[string]toolValidationRule
 }
 
 func protocolNameOrDefault(softTool *softToolCallSettings) string {
@@ -36,6 +39,25 @@ func protocolNameOrDefault(softTool *softToolCallSettings) string {
 		return config.SoftToolProtocolXML
 	}
 	return softTool.Protocol
+}
+
+func newSoftToolCallSettings(protocolName, trigger string, tools []protocol.Tool, toolChoice any) *softToolCallSettings {
+	return &softToolCallSettings{
+		Protocol:   protocolName,
+		Trigger:    trigger,
+		Tools:      tools,
+		ToolChoice: toolChoice,
+	}
+}
+
+func (s *softToolCallSettings) toolValidationRules() map[string]toolValidationRule {
+	if s == nil {
+		return nil
+	}
+	s.validationRulesOnce.Do(func() {
+		s.validationRules = buildToolValidationRules(s.Tools)
+	})
+	return s.validationRules
 }
 
 func (a *App) effectiveSoftToolProtocol(upstream config.UpstreamService) string {
@@ -68,12 +90,7 @@ func (a *App) prepareChatProxyRequest(req *protocol.ChatCompletionRequest, actua
 	resolvedSoftTool := a.resolveSoftToolPromptConfig(upstream)
 	protocolName := resolvedSoftTool.Protocol
 	if hasFunctionCall {
-		softTool = &softToolCallSettings{
-			Protocol:   protocolName,
-			Trigger:    a.trigger,
-			Tools:      req.Tools,
-			ToolChoice: req.ToolChoice,
-		}
+		softTool = newSoftToolCallSettings(protocolName, a.trigger, req.Tools, req.ToolChoice)
 	}
 
 	processedMessages := protocol.PreprocessMessages(req.Messages, a.store, a.trigger, protocolName, a.Config().Features.ConvertDeveloperToSystem)
@@ -201,25 +218,17 @@ func (a *App) streamChatCompletion(ctx context.Context, upstreamURL string, requ
 				detector.AppendToBuffer(deltaContent)
 				a.logStreamDebug("chat.completions", "inbound", "tool_parsing_buffer", "buffer", detector.Buffer())
 				if detector.HasCompleteToolTurn() {
-					parsedTools, err := a.parseSoftToolCalls(detector.Buffer(), softTool)
+					validatedTools, err := a.parseSoftToolCalls(detector.Buffer(), softTool)
 					if err != nil {
 						if callbacks.OnError != nil {
 							_ = callbacks.OnError(softToolParseErrorMessage(err))
 						}
-					} else if len(parsedTools) == 0 {
+					} else if len(validatedTools) == 0 {
 						if callbacks.OnError != nil {
 							_ = callbacks.OnError(softToolParseErrorMessage(nil))
 						}
 					} else if callbacks.OnToolCalls != nil {
-						toolCalls, err := a.toolCallsFromParsedTools(parsedTools, softTool)
-						if err != nil {
-							a.logger.Warn("soft tool validation failed", "error", err.Error())
-							if callbacks.OnError != nil {
-								_ = callbacks.OnError(softToolParseErrorMessage(err))
-							}
-						} else {
-							_ = callbacks.OnToolCalls(toolCalls)
-						}
+						_ = callbacks.OnToolCalls(a.toolCallsFromValidatedTools(validatedTools))
 					}
 					if callbacks.OnDone != nil {
 						_ = callbacks.OnDone()
@@ -249,26 +258,18 @@ func (a *App) streamChatCompletion(ctx context.Context, upstreamURL string, requ
 	}
 
 	if hasFunctionCall && detector.IsToolParsing() {
-		parsedTools, err := a.parseSoftToolCalls(detector.Buffer(), softTool)
-		a.logStreamDebug("chat.completions", "inbound", "stream_finalize_tool_parsing", "parsed_tools", parsedTools, "buffer", detector.Buffer())
+		validatedTools, err := a.parseSoftToolCalls(detector.Buffer(), softTool)
+		a.logStreamDebug("chat.completions", "inbound", "stream_finalize_tool_parsing", "parsed_tools", validatedTools, "buffer", detector.Buffer())
 		if err != nil {
 			if callbacks.OnError != nil {
 				_ = callbacks.OnError(softToolParseErrorMessage(err))
 			}
-		} else if len(parsedTools) == 0 {
+		} else if len(validatedTools) == 0 {
 			if callbacks.OnError != nil {
 				_ = callbacks.OnError(softToolParseErrorMessage(nil))
 			}
 		} else if callbacks.OnToolCalls != nil {
-			toolCalls, err := a.toolCallsFromParsedTools(parsedTools, softTool)
-			if err != nil {
-				a.logger.Warn("soft tool validation failed", "error", err.Error())
-				if callbacks.OnError != nil {
-					_ = callbacks.OnError(softToolParseErrorMessage(err))
-				}
-			} else {
-				_ = callbacks.OnToolCalls(toolCalls)
-			}
+			_ = callbacks.OnToolCalls(a.toolCallsFromValidatedTools(validatedTools))
 		}
 	} else if hasFunctionCall && detector.Buffer() != "" && callbacks.OnText != nil {
 		a.logStreamDebug("chat.completions", "inbound", "stream_flush_buffer", "buffer", detector.Buffer())
@@ -286,24 +287,7 @@ func (a *App) toolCallsFromParsedTools(parsedTools []protocol.ParsedToolCall, so
 	if err != nil {
 		return nil, err
 	}
-
-	toolCalls := make([]map[string]any, 0, len(validated))
-	for index, tool := range validated {
-		id := newID("call_")
-		a.store.Put(id, tool.Name, tool.Args, "Calling tool "+tool.Name)
-		toolCalls = append(toolCalls, map[string]any{
-			"index": index,
-			"id":    id,
-			"type":  "function",
-			"function": map[string]any{
-				"name":      tool.Name,
-				"arguments": mustJSON(tool.Args),
-			},
-		})
-	}
-	a.logInfo("tool.convert", "protocol", "chat.completions", "tool_count", len(toolCalls), "result", "ok")
-	a.logStreamDebug("chat.completions", "internal", "tool_calls_prepared", "tool_calls", toolCalls)
-	return toolCalls, nil
+	return a.toolCallsFromValidatedTools(toValidatedToolCalls(validated)), nil
 }
 
 func writeNamedSSE(w http.ResponseWriter, event string, payload any) error {

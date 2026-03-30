@@ -10,6 +10,11 @@ import (
 	"x-tool/internal/protocol"
 )
 
+type validatedToolCall struct {
+	Name string
+	Args map[string]any
+}
+
 func (a *App) emitToolCalls(w http.ResponseWriter, parsedTools []protocol.ParsedToolCall, model string) bool {
 	if len(parsedTools) == 0 {
 		return false
@@ -21,7 +26,21 @@ func (a *App) emitToolCalls(w http.ResponseWriter, parsedTools []protocol.Parsed
 	return a.emitPreparedToolCalls(w, toolCalls, model) == nil
 }
 
-func (a *App) parseSoftToolCalls(content string, softTool *softToolCallSettings) ([]protocol.ParsedToolCall, error) {
+func toValidatedToolCalls(parsedTools []protocol.ParsedToolCall) []validatedToolCall {
+	if len(parsedTools) == 0 {
+		return nil
+	}
+	validated := make([]validatedToolCall, 0, len(parsedTools))
+	for _, tool := range parsedTools {
+		validated = append(validated, validatedToolCall{
+			Name: tool.Name,
+			Args: tool.Args,
+		})
+	}
+	return validated
+}
+
+func (a *App) parseSoftToolCalls(content string, softTool *softToolCallSettings) ([]validatedToolCall, error) {
 	if softTool == nil {
 		return nil, nil
 	}
@@ -57,7 +76,7 @@ func (a *App) parseSoftToolCalls(content string, softTool *softToolCallSettings)
 		"tool_count", len(validated),
 		"result", "ok",
 	)
-	return validated, nil
+	return toValidatedToolCalls(validated), nil
 }
 
 func (a *App) validateParsedToolCalls(parsedTools []protocol.ParsedToolCall, softTool *softToolCallSettings) ([]protocol.ParsedToolCall, error) {
@@ -69,7 +88,7 @@ func (a *App) validateParsedToolCalls(parsedTools []protocol.ParsedToolCall, sof
 		return nil, fmt.Errorf("tool_choice none forbids tool calls")
 	}
 
-	allowedTools := buildToolValidationRules(softTool.Tools)
+	allowedTools := softTool.toolValidationRules()
 
 	validated := make([]protocol.ParsedToolCall, 0, len(parsedTools))
 	for _, tool := range parsedTools {
@@ -104,6 +123,30 @@ func (a *App) validateParsedToolCalls(parsedTools []protocol.ParsedToolCall, sof
 	}
 
 	return validated, nil
+}
+
+func (a *App) toolCallsFromValidatedTools(validated []validatedToolCall) []map[string]any {
+	if len(validated) == 0 {
+		return nil
+	}
+
+	toolCalls := make([]map[string]any, 0, len(validated))
+	for index, tool := range validated {
+		id := newID("call_")
+		a.store.Put(id, tool.Name, tool.Args, "Calling tool "+tool.Name)
+		toolCalls = append(toolCalls, map[string]any{
+			"index": index,
+			"id":    id,
+			"type":  "function",
+			"function": map[string]any{
+				"name":      tool.Name,
+				"arguments": mustJSON(tool.Args),
+			},
+		})
+	}
+	a.logInfo("tool.convert", "protocol", "chat.completions", "tool_count", len(toolCalls), "result", "ok")
+	a.logStreamDebug("chat.completions", "internal", "tool_calls_prepared", "tool_calls", toolCalls)
+	return toolCalls
 }
 
 func (a *App) emitPreparedToolCalls(w http.ResponseWriter, toolCalls []map[string]any, model string) error {
@@ -175,27 +218,18 @@ func (a *App) transformNonStreamResponse(payload map[string]any, softTool *softT
 		return
 	}
 
-	parsedTools, err := a.parseSoftToolCalls(content[signalPos:], softTool)
+	validatedTools, err := a.parseSoftToolCalls(content[signalPos:], softTool)
 	if err != nil {
 		a.logger.Warn("soft tool transform skipped invalid call", "error", err.Error())
 		return
 	}
-	if len(parsedTools) == 0 {
+	if len(validatedTools) == 0 {
 		return
 	}
 
-	toolCalls := make([]map[string]any, 0, len(parsedTools))
-	for _, tool := range parsedTools {
-		id := newID("call_")
-		a.store.Put(id, tool.Name, tool.Args, "Calling tool "+tool.Name)
-		toolCalls = append(toolCalls, map[string]any{
-			"id":   id,
-			"type": "function",
-			"function": map[string]any{
-				"name":      tool.Name,
-				"arguments": mustJSON(tool.Args),
-			},
-		})
+	toolCalls := a.toolCallsFromValidatedTools(validatedTools)
+	for _, toolCall := range toolCalls {
+		delete(toolCall, "index")
 	}
 
 	contentBeforeSignal := strings.TrimSpace(content[:signalPos])

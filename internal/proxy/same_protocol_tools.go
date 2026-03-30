@@ -57,12 +57,7 @@ func (a *App) prepareResponsesSoftToolRequest(req *protocol.ResponsesRequest, ac
 		if err != nil {
 			return nil, nil, err
 		}
-		softTool = &softToolCallSettings{
-			Protocol:   protocolName,
-			Trigger:    a.trigger,
-			Tools:      chatTools,
-			ToolChoice: protocol.AdaptResponsesToolChoice(req.ToolChoice),
-		}
+		softTool = newSoftToolCallSettings(protocolName, a.trigger, chatTools, protocol.AdaptResponsesToolChoice(req.ToolChoice))
 		prompt, err := GenerateFunctionPrompt(chatTools, a.trigger, resolvedSoftTool.Template, protocolName)
 		if err != nil {
 			return nil, nil, err
@@ -167,12 +162,7 @@ func (a *App) prepareAnthropicSoftToolRequest(req *protocol.AnthropicRequest, ac
 	protocolName := resolvedSoftTool.Protocol
 	if hasFunctionCall {
 		chatTools := protocol.AnthropicToolsToChatTools(req.Tools)
-		softTool = &softToolCallSettings{
-			Protocol:   protocolName,
-			Trigger:    a.trigger,
-			Tools:      chatTools,
-			ToolChoice: protocol.AdaptAnthropicToolChoice(req.ToolChoice),
-		}
+		softTool = newSoftToolCallSettings(protocolName, a.trigger, chatTools, protocol.AdaptAnthropicToolChoice(req.ToolChoice))
 		prompt, err := GenerateFunctionPrompt(chatTools, a.trigger, resolvedSoftTool.Template, protocolName)
 		if err != nil {
 			return nil, nil, err
@@ -365,22 +355,18 @@ func (a *App) transformResponsesResponse(payload map[string]any, softTool *softT
 			continue
 		}
 
-		parsedTools, err := a.parseSoftToolCalls(content[signalPos:], softTool)
+		validatedTools, err := a.parseSoftToolCalls(content[signalPos:], softTool)
 		if err != nil {
 			a.logger.Warn("soft tool transform skipped invalid responses message", "error", err.Error())
 			output = append(output, protocol.CloneMap(item))
 			continue
 		}
-		if len(parsedTools) == 0 {
+		if len(validatedTools) == 0 {
 			output = append(output, protocol.CloneMap(item))
 			continue
 		}
 
-		toolCalls, err := a.toolCallsFromParsedTools(parsedTools, softTool)
-		if err != nil {
-			output = append(output, protocol.CloneMap(item))
-			continue
-		}
+		toolCalls := a.toolCallsFromValidatedTools(validatedTools)
 
 		if prefix := strings.TrimSpace(content[:signalPos]); prefix != "" {
 			output = append(output, responsesMessageOutputItem(prefix))
@@ -510,21 +496,17 @@ func (a *App) transformAnthropicResponse(payload map[string]any, softTool *softT
 			content = append(content, protocol.CloneMap(block))
 			continue
 		}
-		parsedTools, err := a.parseSoftToolCalls(text[signalPos:], softTool)
+		validatedTools, err := a.parseSoftToolCalls(text[signalPos:], softTool)
 		if err != nil {
 			a.logger.Warn("soft tool transform skipped invalid anthropic block", "error", err.Error())
 			content = append(content, protocol.CloneMap(block))
 			continue
 		}
-		if len(parsedTools) == 0 {
+		if len(validatedTools) == 0 {
 			content = append(content, protocol.CloneMap(block))
 			continue
 		}
-		toolCalls, err := a.toolCallsFromParsedTools(parsedTools, softTool)
-		if err != nil {
-			content = append(content, protocol.CloneMap(block))
-			continue
-		}
+		toolCalls := a.toolCallsFromValidatedTools(validatedTools)
 		if prefix := strings.TrimSpace(text[:signalPos]); prefix != "" {
 			content = append(content, map[string]any{
 				"type": "text",
