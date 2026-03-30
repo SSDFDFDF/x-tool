@@ -69,52 +69,41 @@ func (a *App) validateParsedToolCalls(parsedTools []protocol.ParsedToolCall, sof
 		return nil, fmt.Errorf("tool_choice none forbids tool calls")
 	}
 
-	allowedTools := make(map[string]map[string]struct{}, len(softTool.Tools))
-	for _, tool := range softTool.Tools {
-		required := map[string]struct{}{}
-		switch raw := tool.Function.Parameters["required"].(type) {
-		case []any:
-			for _, item := range raw {
-				if name, ok := item.(string); ok && strings.TrimSpace(name) != "" {
-					required[name] = struct{}{}
-				}
-			}
-		case []string:
-			for _, name := range raw {
-				if strings.TrimSpace(name) != "" {
-					required[name] = struct{}{}
-				}
-			}
-		}
-		allowedTools[tool.Function.Name] = required
-	}
+	allowedTools := buildToolValidationRules(softTool.Tools)
 
+	validated := make([]protocol.ParsedToolCall, 0, len(parsedTools))
 	for _, tool := range parsedTools {
-		required, ok := allowedTools[tool.Name]
+		rule, ok := allowedTools[tool.Name]
 		if !ok {
 			return nil, fmt.Errorf("tool %q was not advertised", tool.Name)
 		}
-		for name := range required {
-			if _, ok := tool.Args[name]; !ok {
+
+		args := normalizeToolArgsBySchema(tool.Args, rule.schema)
+		for name := range rule.required {
+			if _, ok := args[name]; !ok {
 				return nil, fmt.Errorf("tool %q missing required parameter %q", tool.Name, name)
 			}
 		}
+		validated = append(validated, protocol.ParsedToolCall{
+			Name: tool.Name,
+			Args: args,
+		})
 	}
 
 	if function, ok := softTool.ToolChoice.(map[string]any); ok {
 		if value, ok := function["function"].(map[string]any); ok {
 			if requiredName, ok := value["name"].(string); ok && strings.TrimSpace(requiredName) != "" {
-				if len(parsedTools) != 1 {
+				if len(validated) != 1 {
 					return nil, fmt.Errorf("tool_choice requires exactly one call to %q", requiredName)
 				}
-				if parsedTools[0].Name != requiredName {
-					return nil, fmt.Errorf("tool_choice requires %q, got %q", requiredName, parsedTools[0].Name)
+				if validated[0].Name != requiredName {
+					return nil, fmt.Errorf("tool_choice requires %q, got %q", requiredName, validated[0].Name)
 				}
 			}
 		}
 	}
 
-	return parsedTools, nil
+	return validated, nil
 }
 
 func (a *App) emitPreparedToolCalls(w http.ResponseWriter, toolCalls []map[string]any, model string) error {
