@@ -465,6 +465,7 @@ func (s *ConfigStore) LoadAppConfig(env *ServerEnv) (*AppConfig, error) {
 	}
 
 	applyFeatures(&cfg.Features, features)
+	EnsureBuiltInSoftToolPromptProfiles(cfg)
 	cfg.ApplyServerEnv(env)
 	cfg.applyDefaults()
 	return cfg, nil
@@ -474,6 +475,7 @@ func (s *ConfigStore) SaveAppConfig(cfg *AppConfig) error {
 	if cfg == nil {
 		return fmt.Errorf("app config is nil")
 	}
+	EnsureBuiltInSoftToolPromptProfiles(cfg)
 	sqlDB, err := s.sqlDB()
 	if err != nil {
 		return err

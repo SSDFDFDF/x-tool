@@ -169,15 +169,17 @@ func defaultConfig(_ *config.ServerEnv) *config.AppConfig {
 	logLevel := "INFO"
 
 	return &config.AppConfig{
+		SoftToolPromptProfiles: config.BuiltInSoftToolPromptProfiles(),
 		Features: config.FeaturesConfig{
-			EnableFunctionCalling:    true,
-			LogLevel:                 logLevel,
-			ConvertDeveloperToSystem: true,
-			PromptInjectionRole:      "system",
-			SoftToolProtocol:         config.SoftToolProtocolXML,
-			KeyPassthrough:           false,
-			ModelPassthrough:         false,
-			PromptTemplate:           "",
+			EnableFunctionCalling:          true,
+			LogLevel:                       logLevel,
+			ConvertDeveloperToSystem:       true,
+			DefaultSoftToolPromptProfileID: config.BuiltInSoftToolPromptProfileClaudeCodeNativeID,
+			PromptInjectionRole:            "system",
+			SoftToolProtocol:               config.SoftToolProtocolXML,
+			KeyPassthrough:                 false,
+			ModelPassthrough:               false,
+			PromptTemplate:                 "",
 		},
 	}
 }

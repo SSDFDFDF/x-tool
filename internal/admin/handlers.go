@@ -304,6 +304,7 @@ func (a *Admin) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		config.EnsureBuiltInSoftToolPromptProfiles(&newConfig)
 		if err := newConfig.Validate(); err != nil {
 			writeError(w, http.StatusBadRequest, "Configuration validation failed", "invalid_request", err.Error())
 			return

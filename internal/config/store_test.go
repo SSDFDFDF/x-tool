@@ -139,13 +139,94 @@ func TestSaveAndLoadAppConfigPersistsUpstreamClientKeys(t *testing.T) {
 	if loaded.Features.DefaultSoftToolPromptProfileID != "weak-markdown" {
 		t.Fatalf("expected default prompt profile id to persist, got %q", loaded.Features.DefaultSoftToolPromptProfileID)
 	}
-	if len(loaded.SoftToolPromptProfiles) != 1 {
-		t.Fatalf("expected 1 prompt profile, got %d", len(loaded.SoftToolPromptProfiles))
+	foundWeakMarkdown := false
+	for _, profile := range loaded.SoftToolPromptProfiles {
+		if profile.ID != "weak-markdown" {
+			continue
+		}
+		foundWeakMarkdown = true
+		if profile.Protocol != SoftToolProtocolMarkdownBlock {
+			t.Fatalf("expected prompt profile protocol to persist, got %q", profile.Protocol)
+		}
 	}
-	if loaded.SoftToolPromptProfiles[0].Protocol != SoftToolProtocolMarkdownBlock {
-		t.Fatalf("expected prompt profile protocol to persist, got %q", loaded.SoftToolPromptProfiles[0].Protocol)
+	if !foundWeakMarkdown {
+		t.Fatalf("expected saved prompt profile to remain available after loading")
 	}
 	if got := loaded.ClientKeys(); len(got) != 2 {
 		t.Fatalf("expected unique client key list, got %#v", got)
+	}
+}
+
+func TestLoadAppConfigAddsBuiltInClaudeCodeNativeProfileForLegacyConfig(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "x-tool-legacy-prompt-profiles.db")
+	db, err := storage.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite database: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
+
+	if err := db.Migrate(); err != nil {
+		t.Fatalf("migrate database: %v", err)
+	}
+
+	store := NewConfigStore(db)
+	legacyConfig := &AppConfig{
+		SoftToolPromptProfiles: []SoftToolPromptProfile{
+			{
+				ID:          "legacy-markdown",
+				Name:        "Legacy Markdown",
+				Description: "legacy profile",
+				Protocol:    SoftToolProtocolMarkdownBlock,
+				Template:    "{tool_catalog}\n{protocol_rules}\n{single_call_example}",
+				Enabled:     true,
+			},
+		},
+		Features: FeaturesConfig{
+			EnableFunctionCalling:          true,
+			LogLevel:                       "INFO",
+			ConvertDeveloperToSystem:       true,
+			PromptTemplate:                 "{tool_catalog}\n{protocol_rules}\n{single_call_example}",
+			DefaultSoftToolPromptProfileID: "legacy-markdown",
+			PromptInjectionRole:            "system",
+			PromptInjectionTarget:          PromptInjectionTargetSystem,
+			SoftToolProtocol:               SoftToolProtocolXML,
+		},
+	}
+
+	if err := store.SaveAppConfig(legacyConfig); err != nil {
+		t.Fatalf("save legacy config: %v", err)
+	}
+
+	sqlDB := db.SqlDB()
+	if _, err := sqlDB.Exec(`DELETE FROM soft_tool_prompt_profiles WHERE id = ?`, BuiltInSoftToolPromptProfileClaudeCodeNativeID); err != nil {
+		t.Fatalf("delete built-in profile to simulate legacy data: %v", err)
+	}
+
+	loaded, err := store.LoadAppConfig(nil)
+	if err != nil {
+		t.Fatalf("load app config: %v", err)
+	}
+
+	foundBuiltIn := false
+	foundLegacy := false
+	for _, profile := range loaded.SoftToolPromptProfiles {
+		switch profile.ID {
+		case BuiltInSoftToolPromptProfileClaudeCodeNativeID:
+			foundBuiltIn = true
+		case "legacy-markdown":
+			foundLegacy = true
+		}
+	}
+
+	if !foundBuiltIn {
+		t.Fatalf("expected built-in Claude Code native profile to be restored for legacy config")
+	}
+	if !foundLegacy {
+		t.Fatalf("expected legacy prompt profile to remain available")
+	}
+	if loaded.Features.DefaultSoftToolPromptProfileID != "legacy-markdown" {
+		t.Fatalf("expected existing default prompt profile binding to remain unchanged, got %q", loaded.Features.DefaultSoftToolPromptProfileID)
 	}
 }

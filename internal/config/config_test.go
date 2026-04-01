@@ -2,6 +2,50 @@ package config
 
 import "testing"
 
+func TestEnsureBuiltInSoftToolPromptProfilesAddsClaudeCodeNativeProfile(t *testing.T) {
+	cfg := &AppConfig{}
+
+	EnsureBuiltInSoftToolPromptProfiles(cfg)
+
+	if len(cfg.SoftToolPromptProfiles) == 0 {
+		t.Fatalf("expected built-in prompt profiles to be added")
+	}
+
+	profile := cfg.SoftToolPromptProfiles[0]
+	if profile.ID != BuiltInSoftToolPromptProfileClaudeCodeNativeID {
+		t.Fatalf("expected first built-in profile id %q, got %q", BuiltInSoftToolPromptProfileClaudeCodeNativeID, profile.ID)
+	}
+	if !profile.Enabled {
+		t.Fatalf("expected built-in profile to be enabled")
+	}
+	if profile.Template == "" {
+		t.Fatalf("expected built-in profile template to be populated")
+	}
+}
+
+func TestMergeBuiltInSoftToolPromptProfilesPreservesExistingBuiltInOverride(t *testing.T) {
+	existing := []SoftToolPromptProfile{{
+		ID:          BuiltInSoftToolPromptProfileClaudeCodeNativeID,
+		Name:        "Custom Native",
+		Description: "custom",
+		Protocol:    SoftToolProtocolMarkdownBlock,
+		Template:    "{tool_catalog}\n{single_call_example}",
+		Enabled:     false,
+	}}
+
+	merged := MergeBuiltInSoftToolPromptProfiles(existing)
+
+	if len(merged) != 1 {
+		t.Fatalf("expected existing built-in override to be preserved without duplicates, got %d profiles", len(merged))
+	}
+	if merged[0].Name != "Custom Native" {
+		t.Fatalf("expected existing built-in override to be kept, got %q", merged[0].Name)
+	}
+	if merged[0].Enabled {
+		t.Fatalf("expected existing built-in override fields to be preserved")
+	}
+}
+
 func TestValidateAllowsEmptyUpstreamServices(t *testing.T) {
 	cfg := &AppConfig{
 		Server: ServerConfig{
