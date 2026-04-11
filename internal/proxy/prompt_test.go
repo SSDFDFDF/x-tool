@@ -213,7 +213,7 @@ func TestGenerateFunctionPromptConsolidatesOutputRulesIntoProtocolRules(t *testi
 	if strings.Count(unescaped, "Output rules:") != 1 {
 		t.Fatalf("expected output rules to appear once via protocol rules, got %q", unescaped)
 	}
-	if !strings.Contains(unescaped, "If a tool is needed: output the tool turn now in this same turn, optionally preceded by ONE brief sentence.") {
+	if !strings.Contains(unescaped, "If a tool is needed: output the tool turn now in this same turn.") {
 		t.Fatalf("expected prompt to forbid delaying tool use into a later turn, got %q", unescaped)
 	}
 	if !strings.Contains(unescaped, "After the tool turn starts: output NOTHING else. No explanations, no summaries, no follow-up.") {
@@ -356,7 +356,7 @@ Output:
 	if !strings.Contains(prompt, "Use <TOOL_CALL> for one tool call and <TOOL_CALLS> for multiple tool calls.") {
 		t.Fatalf("expected protocol rules placeholder to render sentinel JSON instructions, got %q", prompt)
 	}
-	if !strings.Contains(prompt, "If a tool is needed: output the tool turn now in this same turn, optionally preceded by ONE brief sentence.") {
+	if !strings.Contains(prompt, "If a tool is needed: output the tool turn now in this same turn.") {
 		t.Fatalf("expected sentinel JSON rules to forbid delaying tool use into a later turn, got %q", prompt)
 	}
 	if !strings.Contains(prompt, "<Function_Test_Start>\n<TOOL_CALL>") {

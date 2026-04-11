@@ -13,11 +13,10 @@ import (
 )
 
 const baseOutputRules = `Output rules:
-- If no tool is needed: reply with a complete text turn.
-- If a tool is needed: output the tool turn now in this same turn, optionally preceded by ONE brief sentence.
+- If a tool is needed: output the tool turn now in this same turn.
 - After the tool turn starts: output NOTHING else. No explanations, no summaries, no follow-up.`
 
-const defaultXMLPromptTemplate = `Reply in one of two modes only: a complete text turn, or a single XML tool turn, optionally preceded by one brief sentence.
+const defaultXMLPromptTemplate = `Reply in one of two modes only: a complete text turn, or a single XML tool turn.
 Tools: {tool_catalog}
 {protocol_rules}
 Single call shape:
@@ -25,14 +24,11 @@ Single call shape:
 Multiple call shape:
 {multi_call_example}
 Examples:
-Text turn: Hello -> Hello! How can I help?
 Pure tool turn:
 {single_call_example}
-Brief text + tool turn:
-Let me check.
-{single_call_example}`
+`
 
-const defaultSentinelJSONPromptTemplate = `Reply in one of two modes only: a complete text turn, or a single sentinel + JSON tool turn, optionally preceded by one brief sentence.
+const defaultSentinelJSONPromptTemplate = `Reply in one of two modes only: a complete text turn, or a single sentinel + JSON tool turn.
 Tools: {tool_catalog}
 {protocol_rules}
 Single call shape:
@@ -40,14 +36,11 @@ Single call shape:
 Multiple call shape:
 {multi_call_example}
 Examples:
-Text turn: Hello -> Hello! How can I help?
 Pure tool turn:
 {single_call_example}
-Brief text + tool turn:
-Let me check.
-{single_call_example}`
+`
 
-const defaultMarkdownBlockPromptTemplate = `Reply in one of two modes only: a complete text turn, or a single Markdown fenced tool turn, optionally preceded by one brief sentence.
+const defaultMarkdownBlockPromptTemplate = `Reply in one of two modes only: a complete text turn, or a single Markdown fenced tool turn.
 Tools:
 {tool_catalog}
 {protocol_rules}
@@ -56,12 +49,9 @@ Single call shape:
 Multiple call shape:
 {multi_call_example}
 Examples:
-Text turn: Hello -> Hello! How can I help?
 Pure tool turn:
 {single_call_example}
-Brief text + tool turn:
-Let me check.
-{single_call_example}`
+`
 
 type promptTemplateData struct {
 	ProtocolName      string
@@ -132,12 +122,12 @@ func SafeProcessToolChoice(toolChoice any, protocolName string) string {
 			return "\n\nTool choice: none. Reply with a complete text turn only."
 		}
 		if value == "required" {
-			return "\n\nTool choice: required. Output one valid " + formatLabel + " tool turn in this same turn, optionally preceded by one brief sentence. Do not reply with a text turn only. Do not add any text after the tool call."
+			return "\n\nTool choice: required. Output one valid " + formatLabel + " tool turn in this same turn. Do not reply with a text turn only. Do not add any text after the tool call."
 		}
 	case map[string]any:
 		if function, ok := value["function"].(map[string]any); ok {
 			if name, ok := function["name"].(string); ok && strings.TrimSpace(name) != "" {
-				return "\n\nTool choice: required tool `" + name + "`. Output one valid " + formatLabel + " tool turn using this tool in this same turn, optionally preceded by one brief sentence. Do not reply with a text turn only. Do not add any text after the tool call."
+				return "\n\nTool choice: required tool `" + name + "`. Output one valid " + formatLabel + " tool turn using this tool in this same turn. Do not reply with a text turn only. Do not add any text after the tool call."
 			}
 		}
 	}

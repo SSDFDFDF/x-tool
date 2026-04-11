@@ -184,6 +184,18 @@ CREATE TABLE soft_tool_prompt_profiles (
 `,
 		},
 	},
+	{
+		Version:     8,
+		Description: "add soft tool retry attempts",
+		Up: map[string]string{
+			"sqlite": `
+	ALTER TABLE upstream_services ADD COLUMN soft_tool_retry_attempts INTEGER NOT NULL DEFAULT 0;
+`,
+			"postgres": `
+	ALTER TABLE upstream_services ADD COLUMN soft_tool_retry_attempts INTEGER NOT NULL DEFAULT 0;
+`,
+		},
+	},
 }
 
 func (db *DB) Migrate() (err error) {

@@ -227,6 +227,13 @@ onMounted(() => {
                 <option value="DISABLED">DISABLED</option>
               </select>
             </div>
+            <div class="flex flex-col gap-2">
+              <label class="text-sm font-semibold uppercase tracking-wider text-muted font-heading">软工具解析重试次数 (soft_tool_retry_attempts)</label>
+              <input v-model.number="configForm.features.soft_tool_retry_attempts" type="number" min="0" max="5" class="h-12 w-full md:w-1/2 font-mono px-4 bg-white/10 border-b-2 border-white/20 text-white text-sm focus-visible:outline-none focus-visible:border-bitcoin transition-all rounded-md" />
+              <p class="text-xs text-white/55 leading-5">
+                非流式请求中，当软工具解析失败时自动重试上游请求的全局默认次数。0 表示不重试，上限 5。上游节点设置为大于 0 的值时会覆盖这里的默认值。
+              </p>
+            </div>
             <div class="flex flex-col gap-2 md:col-span-2">
               <label class="text-sm font-semibold uppercase tracking-wider text-muted font-heading">提示注入目标 (prompt_injection_target)</label>
               <select v-model="configForm.features.prompt_injection_target" class="h-12 w-full md:w-1/2 font-mono px-4 bg-white/10 border-b-2 border-white/20 text-white rounded-md">

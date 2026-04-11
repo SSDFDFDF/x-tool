@@ -290,6 +290,14 @@ onMounted(() => {
                     </div>
 
                     <div class="flex flex-col gap-2 xl:col-span-4">
+                      <label class="text-[11px] font-semibold uppercase tracking-widest text-muted">软工具解析重试次数 (soft_tool_retry_attempts)</label>
+                      <input v-model.number="up.softToolRetryAttempts" type="number" min="0" max="5" class="h-10 px-3 bg-white/10 border-b-[1.5px] border-white/20 text-white text-sm focus-visible:outline-none focus-visible:border-bitcoin transition-all font-mono" />
+                      <div class="text-xs text-white/55 leading-5">
+                        非流式请求中，当软工具解析失败时自动重试上游请求。填 0 表示沿用全局默认值，填 1-5 表示为该上游单独覆盖重试次数。
+                      </div>
+                    </div>
+
+                    <div class="flex flex-col gap-2 xl:col-span-4">
                       <label class="text-[11px] font-semibold uppercase tracking-widest text-muted">提示注入目标 (prompt_injection_target)</label>
                       <select v-model="up.promptInjectionTarget" class="h-10 w-full font-mono px-3 bg-white/10 border-b-[1.5px] border-white/20 text-white rounded-md" @change="onUpstreamTargetChange(up)">
                         <option

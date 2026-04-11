@@ -10,35 +10,44 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"x-tool/internal/config"
 )
 
-func (a *App) proxyJSON(w http.ResponseWriter, ctx context.Context, upstreamURL string, requestBody map[string]any, headers map[string]string, softTool *softToolCallSettings) {
-	resp, body, err := a.doJSONRequest(ctx, upstreamURL, requestBody, headers)
-	if err != nil {
-		a.logger.Error("non-stream upstream request failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "Internal server error", "server_error", "internal_error")
+func (a *App) proxyJSON(w http.ResponseWriter, ctx context.Context, upstreamURL string, requestBody map[string]any, headers map[string]string, softTool *softToolCallSettings, upstream config.UpstreamService) {
+	maxRetries := a.effectiveSoftToolRetryAttempts(upstream)
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		resp, body, err := a.doJSONRequest(ctx, upstreamURL, requestBody, headers)
+		if err != nil {
+			a.logger.Error("non-stream upstream request failed", "error", err)
+			writeError(w, http.StatusInternalServerError, "Internal server error", "server_error", "internal_error")
+			return
+		}
+		resp.Body.Close()
+
+		if resp.StatusCode >= 400 {
+			writeMappedUpstreamError(w, resp.StatusCode)
+			return
+		}
+
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			a.logger.Error("failed to decode upstream JSON response", "error", err)
+			writeError(w, http.StatusInternalServerError, "Internal server error", "server_error", "internal_error")
+			return
+		}
+
+		if softTool != nil {
+			if err := a.transformNonStreamResponse(payload, softTool); errors.Is(err, errSoftToolTransformFailed) && attempt < maxRetries {
+				a.logInfo("tool.retry", "protocol", "chat.completions", "attempt", attempt+1, "max_retries", maxRetries)
+				continue
+			}
+		}
+		a.logJSONResponseDebug("chat.completions", http.StatusOK, payload)
+		a.logInfo("client.receive.end", "protocol", "chat.completions", "status", http.StatusOK, "stream", false, "result", "ok")
+		writeJSON(w, http.StatusOK, payload)
 		return
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		writeMappedUpstreamError(w, resp.StatusCode)
-		return
-	}
-
-	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err != nil {
-		a.logger.Error("failed to decode upstream JSON response", "error", err)
-		writeError(w, http.StatusInternalServerError, "Internal server error", "server_error", "internal_error")
-		return
-	}
-
-	if softTool != nil {
-		a.transformNonStreamResponse(payload, softTool)
-	}
-	a.logJSONResponseDebug("chat.completions", http.StatusOK, payload)
-	a.logInfo("client.receive.end", "protocol", "chat.completions", "status", http.StatusOK, "stream", false, "result", "ok")
-	writeJSON(w, http.StatusOK, payload)
 }
 
 func (a *App) proxyStream(w http.ResponseWriter, ctx context.Context, upstreamURL string, requestBody map[string]any, headers map[string]string, model string, softTool *softToolCallSettings) {

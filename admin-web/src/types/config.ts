@@ -15,6 +15,7 @@ export type UpstreamService = {
   prompt_injection_target: string
   soft_tool_calling_protocol: string
   soft_tool_prompt_profile_id: string
+  soft_tool_retry_attempts: number
   upstream_protocol: string
   is_default: boolean
 }
@@ -37,6 +38,7 @@ export type FeaturesConfig = {
   prompt_injection_role: string
   prompt_injection_target: string
   soft_tool_calling_protocol: string
+  soft_tool_retry_attempts: number
   key_passthrough: boolean
   model_passthrough: boolean
 }
@@ -58,6 +60,7 @@ export type UpstreamFormModel = {
   promptInjectionTarget: string
   softToolProtocol: string
   softToolPromptProfileID: string
+  softToolRetryAttempts: number
   upstreamProtocol: string
   isDefault: boolean
   modelsText: string

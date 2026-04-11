@@ -10,6 +10,8 @@ import (
 	"x-tool/internal/protocol"
 )
 
+var errSoftToolTransformFailed = fmt.Errorf("soft tool transform failed")
+
 type validatedToolCall struct {
 	Name string
 	Args map[string]any
@@ -190,22 +192,22 @@ func softToolParseErrorMessage(err error) string {
 	return "Error: Detected tool use signal but parsed tool call was invalid: " + err.Error()
 }
 
-func (a *App) transformNonStreamResponse(payload map[string]any, softTool *softToolCallSettings) {
+func (a *App) transformNonStreamResponse(payload map[string]any, softTool *softToolCallSettings) error {
 	choices, ok := payload["choices"].([]any)
 	if !ok || len(choices) == 0 {
-		return
+		return nil
 	}
 	firstChoice, ok := choices[0].(map[string]any)
 	if !ok {
-		return
+		return nil
 	}
 	message, ok := firstChoice["message"].(map[string]any)
 	if !ok {
-		return
+		return nil
 	}
 	content, _ := message["content"].(string)
 	if content == "" {
-		return
+		return nil
 	}
 
 	trigger := a.trigger
@@ -215,16 +217,17 @@ func (a *App) transformNonStreamResponse(payload map[string]any, softTool *softT
 
 	signalPos := strings.Index(content, trigger)
 	if signalPos < 0 {
-		return
+		return nil
 	}
 
 	validatedTools, err := a.parseSoftToolCalls(content[signalPos:], softTool)
 	if err != nil {
-		a.logger.Warn("soft tool transform skipped invalid call", "error", err.Error())
-		return
+		a.logger.Warn("soft tool transform failed, will retry if configured", "error", err.Error())
+		return errSoftToolTransformFailed
 	}
 	if len(validatedTools) == 0 {
-		return
+		a.logger.Warn("soft tool transform produced empty result, will retry if configured")
+		return errSoftToolTransformFailed
 	}
 
 	toolCalls := a.toolCallsFromValidatedTools(validatedTools)
@@ -240,4 +243,19 @@ func (a *App) transformNonStreamResponse(payload map[string]any, softTool *softT
 	}
 	firstChoice["finish_reason"] = "tool_calls"
 	a.logInfo("tool.transform", "protocol", "chat.completions", "tool_count", len(toolCalls), "result", "ok")
+	return nil
+}
+
+func (a *App) effectiveSoftToolRetryAttempts(upstream config.UpstreamService) int {
+	maxAttempts := a.Config().Features.SoftToolRetryAttempts
+	if upstream.SoftToolRetryAttempts > 0 {
+		maxAttempts = upstream.SoftToolRetryAttempts
+	}
+	if maxAttempts < 0 {
+		return 0
+	}
+	if maxAttempts > 5 {
+		return 5
+	}
+	return maxAttempts
 }

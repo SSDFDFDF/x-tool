@@ -100,26 +100,33 @@ func (a *App) handleAnthropicViaNative(w http.ResponseWriter, r *http.Request, r
 		return
 	}
 
-	resp, body, err := a.doJSONRequest(r.Context(), upstreamURL, requestBody, headers)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Internal server error", "server_error", "internal_error")
-		return
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		writeMappedUpstreamError(w, resp.StatusCode)
-		return
-	}
+	maxRetries := a.effectiveSoftToolRetryAttempts(upstream)
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		resp, body, err := a.doJSONRequest(r.Context(), upstreamURL, requestBody, headers)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Internal server error", "server_error", "internal_error")
+			return
+		}
+		resp.Body.Close()
+		if resp.StatusCode >= 400 {
+			writeMappedUpstreamError(w, resp.StatusCode)
+			return
+		}
 
-	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err != nil {
-		writeError(w, http.StatusInternalServerError, "Internal server error", "server_error", "internal_error")
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			writeError(w, http.StatusInternalServerError, "Internal server error", "server_error", "internal_error")
+			return
+		}
+		if err := a.transformAnthropicResponse(payload, softTool); errors.Is(err, errSoftToolTransformFailed) && attempt < maxRetries {
+			a.logInfo("tool.retry", "protocol", "anthropic.messages", "attempt", attempt+1, "max_retries", maxRetries)
+			continue
+		}
+		a.logJSONResponseDebug("anthropic.messages", http.StatusOK, payload)
+		a.logInfo("client.receive.end", "protocol", "anthropic.messages", "status", http.StatusOK, "stream", false, "result", "ok")
+		writeJSON(w, http.StatusOK, payload)
 		return
 	}
-	a.transformAnthropicResponse(payload, softTool)
-	a.logJSONResponseDebug("anthropic.messages", http.StatusOK, payload)
-	a.logInfo("client.receive.end", "protocol", "anthropic.messages", "status", http.StatusOK, "stream", false, "result", "ok")
-	writeJSON(w, http.StatusOK, payload)
 }
 
 func (a *App) handleAnthropicViaChat(w http.ResponseWriter, r *http.Request, req *protocol.AnthropicRequest, upstream config.UpstreamService, actualModel, clientKey string) {
@@ -142,29 +149,36 @@ func (a *App) handleAnthropicViaChat(w http.ResponseWriter, r *http.Request, req
 		return
 	}
 
-	resp, body, err := a.doJSONRequest(r.Context(), upstream.BaseURL+"/chat/completions", requestBody, headers)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Internal server error", "server_error", "internal_error")
-		return
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		writeMappedUpstreamError(w, resp.StatusCode)
-		return
-	}
+	maxRetries := a.effectiveSoftToolRetryAttempts(upstream)
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		resp, body, err := a.doJSONRequest(r.Context(), upstream.BaseURL+"/chat/completions", requestBody, headers)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Internal server error", "server_error", "internal_error")
+			return
+		}
+		resp.Body.Close()
+		if resp.StatusCode >= 400 {
+			writeMappedUpstreamError(w, resp.StatusCode)
+			return
+		}
 
-	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err != nil {
-		writeError(w, http.StatusInternalServerError, "Internal server error", "server_error", "internal_error")
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			writeError(w, http.StatusInternalServerError, "Internal server error", "server_error", "internal_error")
+			return
+		}
+		if softTool != nil {
+			if err := a.transformNonStreamResponse(payload, softTool); errors.Is(err, errSoftToolTransformFailed) && attempt < maxRetries {
+				a.logInfo("tool.retry", "protocol", "anthropic.via_chat", "attempt", attempt+1, "max_retries", maxRetries)
+				continue
+			}
+		}
+		responsePayload := protocol.ConvertChatCompletionToAnthropic(payload, actualModel)
+		a.logJSONResponseDebug("anthropic.messages", http.StatusOK, responsePayload)
+		a.logInfo("client.receive.end", "protocol", "anthropic.messages", "status", http.StatusOK, "stream", false, "result", "ok")
+		writeJSON(w, http.StatusOK, responsePayload)
 		return
 	}
-	if softTool != nil {
-		a.transformNonStreamResponse(payload, softTool)
-	}
-	responsePayload := protocol.ConvertChatCompletionToAnthropic(payload, actualModel)
-	a.logJSONResponseDebug("anthropic.messages", http.StatusOK, responsePayload)
-	a.logInfo("client.receive.end", "protocol", "anthropic.messages", "status", http.StatusOK, "stream", false, "result", "ok")
-	writeJSON(w, http.StatusOK, responsePayload)
 }
 
 func (a *App) streamResponsesFromChat(w http.ResponseWriter, r *http.Request, upstreamURL string, requestBody map[string]any, headers map[string]string, model string, softTool *softToolCallSettings) {

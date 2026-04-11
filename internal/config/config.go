@@ -25,6 +25,7 @@ type UpstreamService struct {
 	PromptInjectionTarget   string   `json:"prompt_injection_target"`
 	SoftToolProtocol        string   `json:"soft_tool_calling_protocol"`
 	SoftToolPromptProfileID string   `json:"soft_tool_prompt_profile_id"`
+	SoftToolRetryAttempts   int      `json:"soft_tool_retry_attempts"`
 	UpstreamProtocol        string   `json:"upstream_protocol"`
 	IsDefault               bool     `json:"is_default"`
 }
@@ -55,6 +56,7 @@ type FeaturesConfig struct {
 	PromptInjectionRole            string `json:"prompt_injection_role"`
 	PromptInjectionTarget          string `json:"prompt_injection_target"`
 	SoftToolProtocol               string `json:"soft_tool_calling_protocol"`
+	SoftToolRetryAttempts          int    `json:"soft_tool_retry_attempts"`
 	KeyPassthrough                 bool   `json:"key_passthrough"`
 	ModelPassthrough               bool   `json:"model_passthrough"`
 }
@@ -190,6 +192,12 @@ func (c *AppConfig) Validate() error {
 		)
 	}
 	c.Features.SoftToolProtocol = protocol
+	if c.Features.SoftToolRetryAttempts < 0 {
+		c.Features.SoftToolRetryAttempts = 0
+	}
+	if c.Features.SoftToolRetryAttempts > 5 {
+		c.Features.SoftToolRetryAttempts = 5
+	}
 
 	profileIDs := map[string]struct{}{}
 	profileNames := map[string]string{}
@@ -270,6 +278,12 @@ func (c *AppConfig) Validate() error {
 		}
 		svc.SoftToolProtocol = strings.ToLower(strings.TrimSpace(svc.SoftToolProtocol))
 		svc.SoftToolPromptProfileID = strings.TrimSpace(svc.SoftToolPromptProfileID)
+		if svc.SoftToolRetryAttempts < 0 {
+			svc.SoftToolRetryAttempts = 0
+		}
+		if svc.SoftToolRetryAttempts > 5 {
+			svc.SoftToolRetryAttempts = 5
+		}
 		upstreamProtocol, ok := NormalizeUpstreamProtocol(svc.UpstreamProtocol)
 		if !ok {
 			return fmt.Errorf("upstream service %q upstream_protocol must be one of %s, %s, %s", svc.Name, UpstreamProtocolOpenAICompat, UpstreamProtocolResponses, UpstreamProtocolAnthropic)

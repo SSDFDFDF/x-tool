@@ -87,6 +87,7 @@ func TestSaveAndLoadAppConfigPersistsUpstreamClientKeys(t *testing.T) {
 				UpstreamProtocol:        UpstreamProtocolResponses,
 				PromptInjectionTarget:   PromptInjectionTargetMessage,
 				SoftToolPromptProfileID: "weak-markdown",
+				SoftToolRetryAttempts:   4,
 			},
 		},
 		SoftToolPromptProfiles: []SoftToolPromptProfile{
@@ -107,6 +108,7 @@ func TestSaveAndLoadAppConfigPersistsUpstreamClientKeys(t *testing.T) {
 			DefaultSoftToolPromptProfileID: "weak-markdown",
 			PromptInjectionRole:            "system",
 			PromptInjectionTarget:          PromptInjectionTargetInstructions,
+			SoftToolRetryAttempts:          2,
 		},
 	}
 
@@ -133,11 +135,17 @@ func TestSaveAndLoadAppConfigPersistsUpstreamClientKeys(t *testing.T) {
 	if loaded.UpstreamServices[0].SoftToolPromptProfileID != "weak-markdown" {
 		t.Fatalf("expected upstream prompt profile id to persist, got %q", loaded.UpstreamServices[0].SoftToolPromptProfileID)
 	}
+	if loaded.UpstreamServices[0].SoftToolRetryAttempts != 4 {
+		t.Fatalf("expected upstream soft tool retry attempts to persist, got %d", loaded.UpstreamServices[0].SoftToolRetryAttempts)
+	}
 	if loaded.Features.PromptInjectionTarget != PromptInjectionTargetInstructions {
 		t.Fatalf("expected feature prompt injection target to persist, got %q", loaded.Features.PromptInjectionTarget)
 	}
 	if loaded.Features.DefaultSoftToolPromptProfileID != "weak-markdown" {
 		t.Fatalf("expected default prompt profile id to persist, got %q", loaded.Features.DefaultSoftToolPromptProfileID)
+	}
+	if loaded.Features.SoftToolRetryAttempts != 2 {
+		t.Fatalf("expected feature soft tool retry attempts to persist, got %d", loaded.Features.SoftToolRetryAttempts)
 	}
 	foundWeakMarkdown := false
 	for _, profile := range loaded.SoftToolPromptProfiles {
@@ -154,6 +162,51 @@ func TestSaveAndLoadAppConfigPersistsUpstreamClientKeys(t *testing.T) {
 	}
 	if got := loaded.ClientKeys(); len(got) != 2 {
 		t.Fatalf("expected unique client key list, got %#v", got)
+	}
+}
+
+func TestSaveAndGetUpstreamPersistsSoftToolRetryAttempts(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "x-tool-upstream.db")
+	db, err := storage.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite database: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Close()
+	})
+
+	if err := db.Migrate(); err != nil {
+		t.Fatalf("migrate database: %v", err)
+	}
+
+	store := NewConfigStore(db)
+	svc := &UpstreamService{
+		Name:                  "openai",
+		BaseURL:               "https://api.openai.com/v1",
+		APIKey:                "upstream-key",
+		Models:                []string{"gpt-4o"},
+		ClientKeys:            []string{"client-a"},
+		SoftToolRetryAttempts: 3,
+		UpstreamProtocol:      UpstreamProtocolOpenAICompat,
+		IsDefault:             true,
+	}
+
+	if err := store.SaveUpstream(svc); err != nil {
+		t.Fatalf("save upstream: %v", err)
+	}
+
+	loaded, err := store.GetUpstream("openai")
+	if err != nil {
+		t.Fatalf("get upstream: %v", err)
+	}
+	if loaded.SoftToolRetryAttempts != 3 {
+		t.Fatalf("expected soft tool retry attempts to persist, got %d", loaded.SoftToolRetryAttempts)
+	}
+	if loaded.UpstreamProtocol != UpstreamProtocolOpenAICompat {
+		t.Fatalf("expected upstream protocol to persist, got %q", loaded.UpstreamProtocol)
+	}
+	if !loaded.IsDefault {
+		t.Fatalf("expected upstream default flag to persist")
 	}
 }
 

@@ -25,6 +25,7 @@ const buildUpstreamFormModel = (upstream?: Partial<UpstreamService>): UpstreamFo
   promptInjectionTarget: upstream?.prompt_injection_target ?? '',
   softToolProtocol: upstream?.soft_tool_calling_protocol ?? '',
   softToolPromptProfileID: upstream?.soft_tool_prompt_profile_id ?? '',
+  softToolRetryAttempts: upstream?.soft_tool_retry_attempts ?? 0,
   upstreamProtocol: upstream?.upstream_protocol ?? 'openai_compat',
   isDefault: upstream?.is_default ?? false,
   modelsText: (upstream?.models ?? []).join('\n'),
@@ -65,7 +66,8 @@ export const configToForm = (config: AppConfig): ConfigFormModel => ({
     default_soft_tool_prompt_profile_id: config.features?.default_soft_tool_prompt_profile_id ?? '',
     prompt_injection_role: config.features?.prompt_injection_role ?? '',
     prompt_injection_target: config.features?.prompt_injection_target ?? '',
-    soft_tool_calling_protocol: config.features?.soft_tool_calling_protocol ?? 'xml'
+    soft_tool_calling_protocol: config.features?.soft_tool_calling_protocol ?? 'xml',
+    soft_tool_retry_attempts: config.features?.soft_tool_retry_attempts ?? 0
   },
   upstreams: (config.upstream_services ?? []).map(buildUpstreamFormModel),
   promptProfiles: (config.soft_tool_prompt_profiles ?? []).map(buildPromptProfileFormModel)
@@ -93,7 +95,8 @@ export const formToConfig = (rawConfig: AppConfig, form: ConfigFormModel): AppCo
     default_soft_tool_prompt_profile_id: form.features.default_soft_tool_prompt_profile_id,
     prompt_injection_role: form.features.prompt_injection_role,
     prompt_injection_target: form.features.prompt_injection_target,
-    soft_tool_calling_protocol: form.features.soft_tool_calling_protocol
+    soft_tool_calling_protocol: form.features.soft_tool_calling_protocol,
+    soft_tool_retry_attempts: Number(form.features.soft_tool_retry_attempts)
   }
 
   const originalUpstreams = rawConfig.upstream_services ?? []
@@ -110,6 +113,7 @@ export const formToConfig = (rawConfig: AppConfig, form: ConfigFormModel): AppCo
       prompt_injection_target: upstream.promptInjectionTarget,
       soft_tool_calling_protocol: upstream.softToolProtocol,
       soft_tool_prompt_profile_id: upstream.softToolPromptProfileID,
+      soft_tool_retry_attempts: Number(upstream.softToolRetryAttempts),
       upstream_protocol: upstream.upstreamProtocol,
       is_default: Boolean(upstream.isDefault),
       models: splitLines(upstream.modelsText),

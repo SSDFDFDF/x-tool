@@ -318,18 +318,19 @@ func anthropicContentToPromptString(content any) string {
 	}
 }
 
-func (a *App) transformResponsesResponse(payload map[string]any, softTool *softToolCallSettings) {
+func (a *App) transformResponsesResponse(payload map[string]any, softTool *softToolCallSettings) error {
 	if softTool == nil {
-		return
+		return nil
 	}
 	outputRaw, ok := payload["output"].([]any)
 	if !ok || len(outputRaw) == 0 {
-		return
+		return nil
 	}
 
 	output := make([]map[string]any, 0, len(outputRaw))
 	rewritten := false
 	convertedToolCount := 0
+	triggerDetected := false
 	for _, rawItem := range outputRaw {
 		item, ok := rawItem.(map[string]any)
 		if !ok {
@@ -355,15 +356,15 @@ func (a *App) transformResponsesResponse(payload map[string]any, softTool *softT
 			continue
 		}
 
+		triggerDetected = true
 		validatedTools, err := a.parseSoftToolCalls(content[signalPos:], softTool)
 		if err != nil {
-			a.logger.Warn("soft tool transform skipped invalid responses message", "error", err.Error())
-			output = append(output, protocol.CloneMap(item))
-			continue
+			a.logger.Warn("soft tool transform failed for responses message", "error", err.Error())
+			return errSoftToolTransformFailed
 		}
 		if len(validatedTools) == 0 {
-			output = append(output, protocol.CloneMap(item))
-			continue
+			a.logger.Warn("soft tool transform produced empty result for responses message")
+			return errSoftToolTransformFailed
 		}
 
 		toolCalls := a.toolCallsFromValidatedTools(validatedTools)
@@ -378,11 +379,16 @@ func (a *App) transformResponsesResponse(payload map[string]any, softTool *softT
 		rewritten = true
 	}
 
+	if !triggerDetected {
+		return nil
+	}
 	if rewritten {
 		payload["output"] = anySliceFromMaps(output)
 		payload["output_text"] = extractResponsesOutputText(output)
 		a.logInfo("tool.transform", "protocol", "responses", "tool_count", convertedToolCount, "result", "ok")
+		return nil
 	}
+	return errSoftToolTransformFailed
 }
 
 func extractResponsesMessageText(item map[string]any) string {
@@ -459,13 +465,13 @@ func anySliceFromMaps(items []map[string]any) []any {
 	return result
 }
 
-func (a *App) transformAnthropicResponse(payload map[string]any, softTool *softToolCallSettings) {
+func (a *App) transformAnthropicResponse(payload map[string]any, softTool *softToolCallSettings) error {
 	if softTool == nil {
-		return
+		return nil
 	}
 	contentRaw, ok := payload["content"].([]any)
 	if !ok || len(contentRaw) == 0 {
-		return
+		return nil
 	}
 
 	trigger := a.trigger
@@ -476,6 +482,7 @@ func (a *App) transformAnthropicResponse(payload map[string]any, softTool *softT
 	rewritten := false
 	content := make([]any, 0, len(contentRaw))
 	convertedToolCount := 0
+	triggerDetected := false
 	for _, rawBlock := range contentRaw {
 		block, ok := rawBlock.(map[string]any)
 		if !ok {
@@ -496,15 +503,15 @@ func (a *App) transformAnthropicResponse(payload map[string]any, softTool *softT
 			content = append(content, protocol.CloneMap(block))
 			continue
 		}
+		triggerDetected = true
 		validatedTools, err := a.parseSoftToolCalls(text[signalPos:], softTool)
 		if err != nil {
-			a.logger.Warn("soft tool transform skipped invalid anthropic block", "error", err.Error())
-			content = append(content, protocol.CloneMap(block))
-			continue
+			a.logger.Warn("soft tool transform failed for anthropic block", "error", err.Error())
+			return errSoftToolTransformFailed
 		}
 		if len(validatedTools) == 0 {
-			content = append(content, protocol.CloneMap(block))
-			continue
+			a.logger.Warn("soft tool transform produced empty result for anthropic block")
+			return errSoftToolTransformFailed
 		}
 		toolCalls := a.toolCallsFromValidatedTools(validatedTools)
 		if prefix := strings.TrimSpace(text[:signalPos]); prefix != "" {
@@ -530,11 +537,16 @@ func (a *App) transformAnthropicResponse(payload map[string]any, softTool *softT
 		rewritten = true
 	}
 
+	if !triggerDetected {
+		return nil
+	}
 	if rewritten {
 		payload["content"] = content
 		payload["stop_reason"] = "tool_use"
 		a.logInfo("tool.transform", "protocol", "anthropic.messages", "tool_count", convertedToolCount, "result", "ok")
+		return nil
 	}
+	return errSoftToolTransformFailed
 }
 
 func (a *App) streamResponsesFromResponsesUpstream(w http.ResponseWriter, ctx context.Context, upstreamURL string, requestBody map[string]any, headers map[string]string, model string, _ *softToolCallSettings) {

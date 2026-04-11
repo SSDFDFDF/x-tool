@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -29,7 +30,7 @@ func (s *ConfigStore) ListUpstreams() ([]UpstreamService, error) {
 	}
 
 	rows, err := s.query(sqlDB, `
-SELECT name, base_url, api_key, models, client_keys, description, prompt_injection_role, prompt_injection_target, soft_tool_calling_protocol, soft_tool_prompt_profile_id, upstream_protocol, is_default
+SELECT name, base_url, api_key, models, client_keys, description, prompt_injection_role, prompt_injection_target, soft_tool_calling_protocol, soft_tool_prompt_profile_id, soft_tool_retry_attempts, upstream_protocol, is_default
 FROM upstream_services
 ORDER BY name
 `)
@@ -55,6 +56,7 @@ ORDER BY name
 			&svc.PromptInjectionTarget,
 			&svc.SoftToolProtocol,
 			&svc.SoftToolPromptProfileID,
+			&svc.SoftToolRetryAttempts,
 			&svc.UpstreamProtocol,
 			&isDefault,
 		); err != nil {
@@ -86,7 +88,7 @@ func (s *ConfigStore) GetUpstream(name string) (*UpstreamService, error) {
 	}
 
 	row := s.queryRow(sqlDB, `
-SELECT name, base_url, api_key, models, client_keys, description, prompt_injection_role, prompt_injection_target, soft_tool_calling_protocol, soft_tool_prompt_profile_id, upstream_protocol, is_default
+SELECT name, base_url, api_key, models, client_keys, description, prompt_injection_role, prompt_injection_target, soft_tool_calling_protocol, soft_tool_prompt_profile_id, soft_tool_retry_attempts, upstream_protocol, is_default
 FROM upstream_services
 WHERE name = ?
 `, name)
@@ -106,6 +108,7 @@ WHERE name = ?
 		&svc.PromptInjectionTarget,
 		&svc.SoftToolProtocol,
 		&svc.SoftToolPromptProfileID,
+		&svc.SoftToolRetryAttempts,
 		&svc.UpstreamProtocol,
 		&isDefault,
 	); err != nil {
@@ -152,8 +155,8 @@ func (s *ConfigStore) SaveUpstream(svc *UpstreamService) error {
 
 	_, err = s.exec(sqlDB, `
 INSERT INTO upstream_services (
-    name, base_url, api_key, models, client_keys, description, prompt_injection_role, prompt_injection_target, soft_tool_calling_protocol, soft_tool_prompt_profile_id, upstream_protocol, is_default, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    name, base_url, api_key, models, client_keys, description, prompt_injection_role, prompt_injection_target, soft_tool_calling_protocol, soft_tool_prompt_profile_id, soft_tool_retry_attempts, upstream_protocol, is_default, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 ON CONFLICT(name) DO UPDATE SET
     base_url = excluded.base_url,
     api_key = excluded.api_key,
@@ -164,6 +167,7 @@ ON CONFLICT(name) DO UPDATE SET
     prompt_injection_target = excluded.prompt_injection_target,
     soft_tool_calling_protocol = excluded.soft_tool_calling_protocol,
     soft_tool_prompt_profile_id = excluded.soft_tool_prompt_profile_id,
+    soft_tool_retry_attempts = excluded.soft_tool_retry_attempts,
     upstream_protocol = excluded.upstream_protocol,
     is_default = excluded.is_default,
     updated_at = CURRENT_TIMESTAMP
@@ -178,6 +182,7 @@ ON CONFLICT(name) DO UPDATE SET
 		svc.PromptInjectionTarget,
 		svc.SoftToolProtocol,
 		svc.SoftToolPromptProfileID,
+		svc.SoftToolRetryAttempts,
 		svc.UpstreamProtocol,
 		isDefault,
 	)
@@ -521,8 +526,8 @@ func (s *ConfigStore) SaveAppConfig(cfg *AppConfig) error {
 		}
 		if _, err := s.txExec(tx, `
 INSERT INTO upstream_services (
-    name, base_url, api_key, models, client_keys, description, prompt_injection_role, prompt_injection_target, soft_tool_calling_protocol, soft_tool_prompt_profile_id, upstream_protocol, is_default, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    name, base_url, api_key, models, client_keys, description, prompt_injection_role, prompt_injection_target, soft_tool_calling_protocol, soft_tool_prompt_profile_id, soft_tool_retry_attempts, upstream_protocol, is_default, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 `,
 			svc.Name,
 			svc.BaseURL,
@@ -534,6 +539,7 @@ INSERT INTO upstream_services (
 			svc.PromptInjectionTarget,
 			svc.SoftToolProtocol,
 			svc.SoftToolPromptProfileID,
+			svc.SoftToolRetryAttempts,
 			svc.UpstreamProtocol,
 			isDefault,
 		); err != nil {
@@ -700,6 +706,7 @@ const (
 	featurePromptInjectionRole            = "prompt_injection_role"
 	featurePromptInjectionTarget          = "prompt_injection_target"
 	featureSoftToolProtocol               = "soft_tool_calling_protocol"
+	featureSoftToolRetryAttempts          = "soft_tool_retry_attempts"
 	featureKeyPassthrough                 = "key_passthrough"
 	featureModelPassthrough               = "model_passthrough"
 	featureAdminPasswordHash              = "admin_password_hash"
@@ -717,6 +724,7 @@ func applyFeatures(cfg *FeaturesConfig, values map[string]string) {
 	cfg.PromptInjectionRole = strings.TrimSpace(values[featurePromptInjectionRole])
 	cfg.PromptInjectionTarget = strings.TrimSpace(values[featurePromptInjectionTarget])
 	cfg.SoftToolProtocol = strings.TrimSpace(values[featureSoftToolProtocol])
+	cfg.SoftToolRetryAttempts = parseInt(values[featureSoftToolRetryAttempts])
 	cfg.KeyPassthrough = parseBool(values[featureKeyPassthrough])
 	cfg.ModelPassthrough = parseBool(values[featureModelPassthrough])
 }
@@ -731,6 +739,7 @@ func featuresFromConfig(cfg FeaturesConfig) map[string]string {
 		featurePromptInjectionRole:            strings.TrimSpace(cfg.PromptInjectionRole),
 		featurePromptInjectionTarget:          strings.TrimSpace(cfg.PromptInjectionTarget),
 		featureSoftToolProtocol:               strings.TrimSpace(cfg.SoftToolProtocol),
+		featureSoftToolRetryAttempts:          strconv.Itoa(cfg.SoftToolRetryAttempts),
 		featureKeyPassthrough:                 formatBool(cfg.KeyPassthrough),
 		featureModelPassthrough:               formatBool(cfg.ModelPassthrough),
 	}
@@ -743,6 +752,13 @@ func parseBool(value string) bool {
 	default:
 		return false
 	}
+}
+
+func parseInt(value string) int {
+	if n, err := strconv.Atoi(strings.TrimSpace(value)); err == nil && n >= 0 {
+		return n
+	}
+	return 0
 }
 
 func formatBool(value bool) string {

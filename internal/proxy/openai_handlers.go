@@ -132,7 +132,7 @@ func (a *App) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		a.proxyStream(w, r.Context(), upstreamURL, requestBody, headers, actualModel, softTool)
 		return
 	}
-	a.proxyJSON(w, r.Context(), upstreamURL, requestBody, headers, softTool)
+	a.proxyJSON(w, r.Context(), upstreamURL, requestBody, headers, softTool, upstream)
 }
 
 func (a *App) handleResponses(w http.ResponseWriter, r *http.Request) {
@@ -226,26 +226,33 @@ func (a *App) handleResponsesViaNative(w http.ResponseWriter, r *http.Request, r
 		a.streamResponsesFromResponsesUpstream(w, r.Context(), upstreamURL, requestBody, headers, actualModel, softTool)
 		return
 	}
-	resp, body, err := a.doJSONRequest(r.Context(), upstreamURL, requestBody, headers)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Internal server error", "server_error", "internal_error")
-		return
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		writeMappedUpstreamError(w, resp.StatusCode)
-		return
-	}
+	maxRetries := a.effectiveSoftToolRetryAttempts(upstream)
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		resp, body, err := a.doJSONRequest(r.Context(), upstreamURL, requestBody, headers)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Internal server error", "server_error", "internal_error")
+			return
+		}
+		resp.Body.Close()
+		if resp.StatusCode >= 400 {
+			writeMappedUpstreamError(w, resp.StatusCode)
+			return
+		}
 
-	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err != nil {
-		writeError(w, http.StatusInternalServerError, "Internal server error", "server_error", "internal_error")
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			writeError(w, http.StatusInternalServerError, "Internal server error", "server_error", "internal_error")
+			return
+		}
+		if err := a.transformResponsesResponse(payload, softTool); errors.Is(err, errSoftToolTransformFailed) && attempt < maxRetries {
+			a.logInfo("tool.retry", "protocol", "responses", "attempt", attempt+1, "max_retries", maxRetries)
+			continue
+		}
+		a.logJSONResponseDebug("responses", http.StatusOK, payload)
+		a.logInfo("client.receive.end", "protocol", "responses", "status", http.StatusOK, "stream", false, "result", "ok")
+		writeJSON(w, http.StatusOK, payload)
 		return
 	}
-	a.transformResponsesResponse(payload, softTool)
-	a.logJSONResponseDebug("responses", http.StatusOK, payload)
-	a.logInfo("client.receive.end", "protocol", "responses", "status", http.StatusOK, "stream", false, "result", "ok")
-	writeJSON(w, http.StatusOK, payload)
 }
 
 func (a *App) handleResponsesViaChat(w http.ResponseWriter, r *http.Request, req *protocol.ResponsesRequest, upstream config.UpstreamService, actualModel, clientKey string) {
@@ -269,27 +276,34 @@ func (a *App) handleResponsesViaChat(w http.ResponseWriter, r *http.Request, req
 		return
 	}
 
-	resp, body, err := a.doJSONRequest(r.Context(), upstream.BaseURL+"/chat/completions", requestBody, headers)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Internal server error", "server_error", "internal_error")
-		return
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		writeMappedUpstreamError(w, resp.StatusCode)
-		return
-	}
+	maxRetries := a.effectiveSoftToolRetryAttempts(upstream)
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		resp, body, err := a.doJSONRequest(r.Context(), upstream.BaseURL+"/chat/completions", requestBody, headers)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "Internal server error", "server_error", "internal_error")
+			return
+		}
+		resp.Body.Close()
+		if resp.StatusCode >= 400 {
+			writeMappedUpstreamError(w, resp.StatusCode)
+			return
+		}
 
-	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err != nil {
-		writeError(w, http.StatusInternalServerError, "Internal server error", "server_error", "internal_error")
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			writeError(w, http.StatusInternalServerError, "Internal server error", "server_error", "internal_error")
+			return
+		}
+		if softTool != nil {
+			if err := a.transformNonStreamResponse(payload, softTool); errors.Is(err, errSoftToolTransformFailed) && attempt < maxRetries {
+				a.logInfo("tool.retry", "protocol", "responses.via_chat", "attempt", attempt+1, "max_retries", maxRetries)
+				continue
+			}
+		}
+		responsePayload := protocol.ConvertChatCompletionToResponses(payload, actualModel)
+		a.logJSONResponseDebug("responses", http.StatusOK, responsePayload)
+		a.logInfo("client.receive.end", "protocol", "responses", "status", http.StatusOK, "stream", false, "result", "ok")
+		writeJSON(w, http.StatusOK, responsePayload)
 		return
 	}
-	if softTool != nil {
-		a.transformNonStreamResponse(payload, softTool)
-	}
-	responsePayload := protocol.ConvertChatCompletionToResponses(payload, actualModel)
-	a.logJSONResponseDebug("responses", http.StatusOK, responsePayload)
-	a.logInfo("client.receive.end", "protocol", "responses", "status", http.StatusOK, "stream", false, "result", "ok")
-	writeJSON(w, http.StatusOK, responsePayload)
 }
