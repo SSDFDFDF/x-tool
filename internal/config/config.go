@@ -100,6 +100,7 @@ const (
 
 	PromptInjectionTargetAuto         = "auto"
 	PromptInjectionTargetMessage      = "message"
+	PromptInjectionTargetLastUser     = "last_user_message"
 	PromptInjectionTargetSystem       = "system"
 	PromptInjectionTargetInstructions = "instructions"
 
@@ -145,6 +146,8 @@ func NormalizePromptInjectionTarget(value string) (string, bool) {
 		return PromptInjectionTargetAuto, true
 	case PromptInjectionTargetMessage:
 		return PromptInjectionTargetMessage, true
+	case PromptInjectionTargetLastUser:
+		return PromptInjectionTargetLastUser, true
 	case PromptInjectionTargetSystem:
 		return PromptInjectionTargetSystem, true
 	case PromptInjectionTargetInstructions:
@@ -179,7 +182,7 @@ func (c *AppConfig) Validate() error {
 	c.Features.PromptInjectionRole = strings.TrimSpace(c.Features.PromptInjectionRole)
 	injectionTarget, ok := NormalizePromptInjectionTarget(c.Features.PromptInjectionTarget)
 	if !ok {
-		return fmt.Errorf("features.prompt_injection_target must be one of %s, %s, %s, %s", PromptInjectionTargetAuto, PromptInjectionTargetMessage, PromptInjectionTargetSystem, PromptInjectionTargetInstructions)
+		return fmt.Errorf("features.prompt_injection_target must be one of %s, %s, %s, %s, %s", PromptInjectionTargetAuto, PromptInjectionTargetMessage, PromptInjectionTargetLastUser, PromptInjectionTargetSystem, PromptInjectionTargetInstructions)
 	}
 	c.Features.PromptInjectionTarget = injectionTarget
 	protocol, ok := NormalizeSoftToolProtocol(c.Features.SoftToolProtocol)
@@ -272,7 +275,7 @@ func (c *AppConfig) Validate() error {
 		if svc.PromptInjectionTarget != "" {
 			promptTarget, ok := NormalizePromptInjectionTarget(svc.PromptInjectionTarget)
 			if !ok {
-				return fmt.Errorf("upstream service %q prompt_injection_target must be one of %s, %s, %s, %s", svc.Name, PromptInjectionTargetAuto, PromptInjectionTargetMessage, PromptInjectionTargetSystem, PromptInjectionTargetInstructions)
+				return fmt.Errorf("upstream service %q prompt_injection_target must be one of %s, %s, %s, %s, %s", svc.Name, PromptInjectionTargetAuto, PromptInjectionTargetMessage, PromptInjectionTargetLastUser, PromptInjectionTargetSystem, PromptInjectionTargetInstructions)
 			}
 			svc.PromptInjectionTarget = promptTarget
 		}

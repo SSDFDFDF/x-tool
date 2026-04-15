@@ -226,6 +226,42 @@ func TestValidateNormalizesPromptInjectionTarget(t *testing.T) {
 	}
 }
 
+func TestValidateAcceptsLastUserPromptInjectionTarget(t *testing.T) {
+	cfg := &AppConfig{
+		Server: ServerConfig{
+			Port:    8000,
+			Host:    "0.0.0.0",
+			Timeout: 180,
+		},
+		Features: FeaturesConfig{
+			LogLevel:              "INFO",
+			PromptTemplate:        "{tool_catalog}\n{protocol_rules}\n{output_rules}",
+			PromptInjectionTarget: "LAST_USER_MESSAGE",
+		},
+		UpstreamServices: []UpstreamService{
+			{
+				Name:                  "openai",
+				BaseURL:               "https://a.example.com/v1",
+				APIKey:                "key-a",
+				IsDefault:             true,
+				Models:                []string{"gpt-4o"},
+				ClientKeys:            []string{"client-a"},
+				PromptInjectionTarget: "last_user_message",
+			},
+		},
+	}
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected config to validate, got %v", err)
+	}
+	if cfg.Features.PromptInjectionTarget != PromptInjectionTargetLastUser {
+		t.Fatalf("expected normalized feature prompt injection target, got %q", cfg.Features.PromptInjectionTarget)
+	}
+	if cfg.UpstreamServices[0].PromptInjectionTarget != PromptInjectionTargetLastUser {
+		t.Fatalf("expected normalized upstream prompt injection target, got %q", cfg.UpstreamServices[0].PromptInjectionTarget)
+	}
+}
+
 func TestValidateAcceptsMarkdownBlockSoftToolProtocol(t *testing.T) {
 	cfg := &AppConfig{
 		Server: ServerConfig{

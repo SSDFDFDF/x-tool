@@ -2,7 +2,7 @@ import { computed, ref, type Ref } from 'vue'
 import type { UpstreamFormModel, ConfigFormModel } from '../types/config'
 import { showMessage } from '../utils/message'
 
-export type PromptInjectionTarget = 'auto' | 'message' | 'system' | 'instructions'
+export type PromptInjectionTarget = 'auto' | 'message' | 'last_user_message' | 'system' | 'instructions'
 export type UpstreamProtocol = 'openai_compat' | 'responses' | 'anthropic'
 export type RoleOption = { value: string; label: string }
 
@@ -18,7 +18,7 @@ export const upstreamProtocolOptions: Array<{ value: UpstreamProtocol; label: st
 ]
 
 export const normalizePromptInjectionTarget = (value: string): PromptInjectionTarget | '' => {
-  if (value === 'auto' || value === 'message' || value === 'system' || value === 'instructions') {
+  if (value === 'auto' || value === 'message' || value === 'last_user_message' || value === 'system' || value === 'instructions') {
     return value
   }
   return ''
@@ -44,26 +44,34 @@ export const getPromptInjectionRoleMode = (value: string) => {
 export const targetOptionsForProtocol = (protocol: string): Array<{ value: string; label: string; desc: string }> => {
   switch (protocol) {
     case 'openai_compat':
-      return [{ value: 'message', label: 'message（固定）', desc: 'OpenAI Chat 只能作为 message 注入' }]
+      return [
+        { value: '', label: '默认 / 继承', desc: '' },
+        { value: 'auto', label: 'auto', desc: '→ message' },
+        { value: 'message', label: 'message', desc: '前插一条独立 message' },
+        { value: 'last_user_message', label: 'last_user_message', desc: '写入最后一条 user message 内容' }
+      ]
     case 'responses':
       return [
         { value: '', label: '默认 / 继承', desc: '' },
         { value: 'auto', label: 'auto', desc: '→ instructions' },
         { value: 'instructions', label: 'instructions', desc: '注入到 instructions 字段' },
-        { value: 'message', label: 'message', desc: '注入为 input 消息' }
+        { value: 'message', label: 'message', desc: '前插一条 input 消息' },
+        { value: 'last_user_message', label: 'last_user_message', desc: '写入最后一条 user input 内容' }
       ]
     case 'anthropic':
       return [
         { value: '', label: '默认 / 继承', desc: '' },
         { value: 'auto', label: 'auto', desc: '→ system' },
         { value: 'system', label: 'system', desc: '注入到 system 字段' },
-        { value: 'message', label: 'message', desc: '注入为 messages 消息' }
+        { value: 'message', label: 'message', desc: '前插一条 messages 消息' },
+        { value: 'last_user_message', label: 'last_user_message', desc: '写入最后一条 user message 内容' }
       ]
     default:
       return [
         { value: '', label: '默认 / 继承', desc: '' },
         { value: 'auto', label: 'auto', desc: '' },
-        { value: 'message', label: 'message', desc: '' }
+        { value: 'message', label: 'message', desc: '' },
+        { value: 'last_user_message', label: 'last_user_message', desc: '' }
       ]
   }
 }

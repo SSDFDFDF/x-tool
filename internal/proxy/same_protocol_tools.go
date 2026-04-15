@@ -67,7 +67,9 @@ func (a *App) prepareResponsesSoftToolRequest(req *protocol.ResponsesRequest, ac
 		}
 
 		injection := a.resolvePromptInjection(upstream)
-		if injection.Target == config.PromptInjectionTargetMessage {
+		if injection.Target == config.PromptInjectionTargetLastUser {
+			requestBody["input"] = a.injectPromptIntoLatestResponsesUserInput(req.Input, prompt)
+		} else if injection.Target == config.PromptInjectionTargetMessage {
 			requestBody["input"] = a.prependResponsesPromptInput(req.Input, prompt, injection.Role)
 		} else {
 			instructions := strings.TrimSpace(req.Instructions)
@@ -89,14 +91,8 @@ func (a *App) prepareResponsesSoftToolRequest(req *protocol.ResponsesRequest, ac
 }
 
 func (a *App) prependResponsesPromptInput(input any, prompt, role string) any {
-	promptItem := map[string]any{
-		"type": "message",
-		"role": role,
-		"content": []map[string]any{{
-			"type": "input_text",
-			"text": prompt,
-		}},
-	}
+	promptItem := responsesPromptMessage(prompt)
+	promptItem["role"] = role
 
 	switch value := input.(type) {
 	case nil:
@@ -181,7 +177,9 @@ func (a *App) prepareAnthropicSoftToolRequest(req *protocol.AnthropicRequest, ac
 			}
 		}
 		messages := a.preprocessAnthropicMessagesForSoftTools(req.Messages, protocolName)
-		if injection.Target == config.PromptInjectionTargetMessage {
+		if injection.Target == config.PromptInjectionTargetLastUser {
+			messages = a.injectPromptIntoLatestAnthropicUserMessage(messages, req.Messages, prompt)
+		} else if injection.Target == config.PromptInjectionTargetMessage {
 			messages = prependAnthropicPromptMessage(messages, prompt, injection.Role)
 		}
 		requestBody["messages"] = messages

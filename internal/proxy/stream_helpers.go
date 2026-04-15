@@ -109,10 +109,14 @@ func (a *App) prepareChatProxyRequest(req *protocol.ChatCompletionRequest, actua
 		}
 
 		injection := a.resolvePromptInjection(upstream)
-		requestBody["messages"] = append([]map[string]any{{
-			"role":    injection.Role,
-			"content": prompt,
-		}}, processedMessages...)
+		if injection.Target == config.PromptInjectionTargetLastUser {
+			requestBody["messages"] = a.injectPromptIntoLatestChatUserMessage(processedMessages, req.Messages, prompt)
+		} else {
+			requestBody["messages"] = append([]map[string]any{{
+				"role":    injection.Role,
+				"content": prompt,
+			}}, processedMessages...)
+		}
 		delete(requestBody, "tools")
 		delete(requestBody, "tool_choice")
 	} else if hasTools {

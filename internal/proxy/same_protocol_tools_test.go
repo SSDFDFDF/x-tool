@@ -613,6 +613,107 @@ func TestPrepareChatProxyRequestUsesBoundPromptProfileTemplate(t *testing.T) {
 	}
 }
 
+func TestPrepareChatProxyRequestInjectsPromptIntoLastOriginalUserMessage(t *testing.T) {
+	cfg := testConfig()
+	cfg.Features.PromptInjectionTarget = config.PromptInjectionTargetLastUser
+	app, err := NewApp(cfg, nil, nil, slog.Default(), nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create app: %v", err)
+	}
+	app.trigger = "<Function_Test_Start>"
+
+	req := &protocol.ChatCompletionRequest{
+		Raw: map[string]any{
+			"model": "gpt-4o",
+			"messages": []any{
+				map[string]any{"role": "user", "content": "where is the weather"},
+				map[string]any{"role": "assistant", "content": "calling tool"},
+				map[string]any{"role": "tool", "tool_call_id": "call_1", "content": "sunny"},
+			},
+		},
+		Model: "gpt-4o",
+		Messages: []map[string]any{
+			{"role": "user", "content": "where is the weather"},
+			{"role": "assistant", "content": "calling tool"},
+			{"role": "tool", "tool_call_id": "call_1", "content": "sunny"},
+		},
+		Tools: []protocol.Tool{{
+			Type: "function",
+			Function: protocol.ToolFunction{
+				Name:       "search",
+				Parameters: map[string]any{"type": "object"},
+			},
+		}},
+	}
+
+	requestBody, _, err := app.prepareChatProxyRequest(req, "gpt-4o-mini", cfgUpstream(config.UpstreamProtocolOpenAICompat))
+	if err != nil {
+		t.Fatalf("prepare request: %v", err)
+	}
+
+	messages, _ := requestBody["messages"].([]map[string]any)
+	if len(messages) != 3 {
+		t.Fatalf("expected rewritten messages without prepended prompt message, got %#v", requestBody["messages"])
+	}
+	firstContent, _ := messages[0]["content"].(string)
+	if !strings.Contains(firstContent, app.trigger) || !strings.Contains(firstContent, "where is the weather") {
+		t.Fatalf("expected prompt injected into original user content, got %#v", messages[0]["content"])
+	}
+	lastContent, _ := messages[2]["content"].(string)
+	if strings.Contains(lastContent, app.trigger) {
+		t.Fatalf("expected converted tool result message to remain untouched, got %#v", messages[2]["content"])
+	}
+}
+
+func TestPrepareChatProxyRequestLastUserFallbackAppendsUserMessage(t *testing.T) {
+	cfg := testConfig()
+	cfg.Features.PromptInjectionTarget = config.PromptInjectionTargetLastUser
+	app, err := NewApp(cfg, nil, nil, slog.Default(), nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create app: %v", err)
+	}
+	app.trigger = "<Function_Test_Start>"
+
+	req := &protocol.ChatCompletionRequest{
+		Raw: map[string]any{
+			"model": "gpt-4o",
+			"messages": []any{
+				map[string]any{"role": "system", "content": "be brief"},
+				map[string]any{"role": "assistant", "content": "ready"},
+			},
+		},
+		Model: "gpt-4o",
+		Messages: []map[string]any{
+			{"role": "system", "content": "be brief"},
+			{"role": "assistant", "content": "ready"},
+		},
+		Tools: []protocol.Tool{{
+			Type: "function",
+			Function: protocol.ToolFunction{
+				Name:       "search",
+				Parameters: map[string]any{"type": "object"},
+			},
+		}},
+	}
+
+	requestBody, _, err := app.prepareChatProxyRequest(req, "gpt-4o-mini", cfgUpstream(config.UpstreamProtocolOpenAICompat))
+	if err != nil {
+		t.Fatalf("prepare request: %v", err)
+	}
+
+	messages, _ := requestBody["messages"].([]map[string]any)
+	if len(messages) != 3 {
+		t.Fatalf("expected fallback user message to be appended, got %#v", requestBody["messages"])
+	}
+	if messages[2]["role"] != "user" {
+		t.Fatalf("expected appended fallback user message, got %#v", messages[2])
+	}
+	content, _ := messages[2]["content"].(string)
+	if !strings.Contains(content, app.trigger) {
+		t.Fatalf("expected fallback message to contain injected prompt, got %#v", messages[2]["content"])
+	}
+}
+
 func TestResolvePromptInjectionAutoDefaultsByProtocol(t *testing.T) {
 	app, err := NewApp(testConfig(), nil, nil, slog.Default(), nil, nil)
 	if err != nil {
@@ -729,6 +830,141 @@ func TestPrepareAnthropicSoftToolRequestInjectsPromptIntoMessageTarget(t *testin
 	content, _ := messages[0]["content"].(string)
 	if !strings.Contains(content, app.trigger) {
 		t.Fatalf("expected injected anthropic prompt content, got %#v", messages[0]["content"])
+	}
+}
+
+func TestPrepareResponsesSoftToolRequestInjectsPromptIntoLastOriginalUserInput(t *testing.T) {
+	cfg := testConfig()
+	cfg.Features.PromptInjectionTarget = config.PromptInjectionTargetLastUser
+	app, err := NewApp(cfg, nil, nil, slog.Default(), nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create app: %v", err)
+	}
+	app.trigger = "<Function_Test_Start>"
+
+	req := &protocol.ResponsesRequest{
+		Raw: map[string]any{
+			"model": "gpt-4o",
+			"input": []any{
+				map[string]any{
+					"type": "message",
+					"role": "user",
+					"content": []any{
+						map[string]any{"type": "input_text", "text": "ping"},
+					},
+				},
+				map[string]any{
+					"type":    "function_call_output",
+					"call_id": "call_1",
+					"output":  "done",
+				},
+			},
+		},
+		Model: "gpt-4o",
+		Input: []any{
+			map[string]any{
+				"type": "message",
+				"role": "user",
+				"content": []any{
+					map[string]any{"type": "input_text", "text": "ping"},
+				},
+			},
+			map[string]any{
+				"type":    "function_call_output",
+				"call_id": "call_1",
+				"output":  "done",
+			},
+		},
+		Tools: []protocol.ResponseTool{{
+			Type:       "function",
+			Name:       "search",
+			Parameters: map[string]any{"type": "object"},
+		}},
+	}
+
+	requestBody, _, err := app.prepareResponsesSoftToolRequest(req, "gpt-4o-mini", cfgUpstream(config.UpstreamProtocolResponses))
+	if err != nil {
+		t.Fatalf("prepare request: %v", err)
+	}
+
+	input, _ := requestBody["input"].([]any)
+	if len(input) != 2 {
+		t.Fatalf("expected original item count to be preserved, got %#v", requestBody["input"])
+	}
+	first, _ := input[0].(map[string]any)
+	firstContent, _ := first["content"].([]any)
+	firstPart, _ := firstContent[0].(map[string]any)
+	firstText, _ := firstPart["text"].(string)
+	secondPart, _ := firstContent[1].(map[string]any)
+	originalUserText, _ := secondPart["text"].(string)
+	if !strings.Contains(firstText, app.trigger) || originalUserText != "ping" {
+		t.Fatalf("expected prompt injected into original user input, got %#v", first["content"])
+	}
+	second, _ := input[1].(map[string]any)
+	secondContent, _ := second["content"].([]map[string]any)
+	secondText, _ := secondContent[0]["text"].(string)
+	if len(secondContent) == 0 || strings.Contains(secondText, app.trigger) {
+		t.Fatalf("expected converted function_call_output user message to remain untouched, got %#v", second)
+	}
+}
+
+func TestPrepareAnthropicSoftToolRequestInjectsPromptIntoLastUserContent(t *testing.T) {
+	cfg := testConfig()
+	cfg.Features.PromptInjectionTarget = config.PromptInjectionTargetLastUser
+	app, err := NewApp(cfg, nil, nil, slog.Default(), nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create app: %v", err)
+	}
+	app.trigger = "<Function_Test_Start>"
+
+	req := &protocol.AnthropicRequest{
+		Raw: map[string]any{
+			"model": "claude-test",
+			"messages": []any{
+				map[string]any{"role": "user", "content": "first"},
+				map[string]any{"role": "assistant", "content": "ok"},
+				map[string]any{
+					"role": "user",
+					"content": []any{
+						map[string]any{"type": "text", "text": "second"},
+					},
+				},
+			},
+			"tools": []any{
+				map[string]any{"name": "search"},
+			},
+		},
+		Model: "claude-test",
+		Messages: []map[string]any{
+			{"role": "user", "content": "first"},
+			{"role": "assistant", "content": "ok"},
+			{"role": "user", "content": []any{
+				map[string]any{"type": "text", "text": "second"},
+			}},
+		},
+		Tools: []protocol.AnthropicTool{{
+			Name:        "search",
+			InputSchema: map[string]any{"type": "object"},
+		}},
+	}
+
+	requestBody, _, err := app.prepareAnthropicSoftToolRequest(req, "claude-sonnet", cfgUpstream(config.UpstreamProtocolAnthropic))
+	if err != nil {
+		t.Fatalf("prepare request: %v", err)
+	}
+
+	messages, _ := requestBody["messages"].([]map[string]any)
+	if len(messages) != 3 {
+		t.Fatalf("expected original message count to be preserved, got %#v", requestBody["messages"])
+	}
+	content, _ := messages[2]["content"].([]any)
+	firstPart, _ := content[0].(map[string]any)
+	firstText, _ := firstPart["text"].(string)
+	if !strings.Contains(firstText, app.trigger) {
+		t.Fatalf("expected prompt text block to be injected into latest user content, got %#v", messages[2]["content"])
+	}
+	if messages[0]["content"] != "first" {
+		t.Fatalf("expected earlier user message to remain untouched, got %#v", messages[0]["content"])
 	}
 }
 

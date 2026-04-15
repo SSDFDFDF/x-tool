@@ -85,7 +85,7 @@ func TestSaveAndLoadAppConfigPersistsUpstreamClientKeys(t *testing.T) {
 				Models:                  []string{"gpt-4o"},
 				ClientKeys:              []string{"client-a", "client-b"},
 				UpstreamProtocol:        UpstreamProtocolResponses,
-				PromptInjectionTarget:   PromptInjectionTargetMessage,
+				PromptInjectionTarget:   PromptInjectionTargetLastUser,
 				SoftToolPromptProfileID: "weak-markdown",
 				SoftToolRetryAttempts:   4,
 			},
@@ -129,7 +129,7 @@ func TestSaveAndLoadAppConfigPersistsUpstreamClientKeys(t *testing.T) {
 	if loaded.UpstreamServices[0].UpstreamProtocol != UpstreamProtocolResponses {
 		t.Fatalf("expected upstream protocol to persist, got %q", loaded.UpstreamServices[0].UpstreamProtocol)
 	}
-	if loaded.UpstreamServices[0].PromptInjectionTarget != PromptInjectionTargetMessage {
+	if loaded.UpstreamServices[0].PromptInjectionTarget != PromptInjectionTargetLastUser {
 		t.Fatalf("expected upstream prompt injection target to persist, got %q", loaded.UpstreamServices[0].PromptInjectionTarget)
 	}
 	if loaded.UpstreamServices[0].SoftToolPromptProfileID != "weak-markdown" {

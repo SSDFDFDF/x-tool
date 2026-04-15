@@ -11,7 +11,7 @@ import {
   updatePromptInjectionRoleMode
 } from '../composables/useUpstreamConfig'
 
-type PromptInjectionTarget = 'auto' | 'message' | 'system' | 'instructions'
+type PromptInjectionTarget = 'auto' | 'message' | 'last_user_message' | 'system' | 'instructions'
 
 const router = useRouter()
 
@@ -30,6 +30,7 @@ const globalPromptInjectionTargetOptions: Array<{ value: PromptInjectionTarget |
   { value: '', label: '默认 (auto)' },
   { value: 'auto', label: 'auto' },
   { value: 'message', label: 'message' },
+  { value: 'last_user_message', label: 'last_user_message' },
   { value: 'system', label: 'system' },
   { value: 'instructions', label: 'instructions' }
 ]
@@ -243,6 +244,7 @@ onMounted(() => {
               </select>
               <p class="text-xs text-white/55 leading-5">
                 `auto` 会按协议自动选择注入位置：OpenAI compat 走 `message`，Responses 走 `instructions`，Anthropic 走 `system`。
+                `last_user_message` 会把提示词写进最后一条 `user` 内容，而不是新增独立消息。
                 如果没有显式设置 target，但显式 role 是 `user` 或 `assistant`，Responses / Anthropic 会保持消息注入语义。
               </p>
             </div>
